@@ -1,0 +1,31 @@
+[package]
+authors = ["you"]
+description = "Desktop app for designing workout programs and syncing to Hevy"
+edition = "2021"
+license = ""
+name = "hevy-program-extension"
+repository = ""
+rust-version = "1.77.2"
+version = "0.1.0"
+
+[lib]
+crate-type = ["staticlib", "cdylib", "rlib"]
+name = "app_lib"
+
+[build-dependencies]
+tauri-build = {version = "2", features = [] }
+
+[dependencies]
+keyring = {version = "3", features = ["sync-secret-service", "vendored"] }
+log = "0.4"
+reqwest = {version = "0.12", features = ["json"] }
+rusqlite = {version = "0.32", features = ["bundled"] }
+serde = {version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = {version = "2", features = [] }
+tauri-plugin-http = "2"
+tauri-plugin-log = "2"
+tauri-plugin-sql = {version = "2", features = ["sqlite"] }
+tauri-plugin-store = "2"
+tokio = {version = "1", features = ["full"] }
+uuid = {version = "1", features = ["v4"] }

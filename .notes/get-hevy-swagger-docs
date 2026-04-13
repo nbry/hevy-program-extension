@@ -1,0 +1,1 @@
+curl -s https://api.hevyapp.com/docs/swagger-ui-init.js | head -500
