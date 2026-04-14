@@ -1,11 +1,14 @@
 import { useParams } from "react-router";
 import { useProgramStore } from "../stores/programStore";
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ProgramGrid } from "../components/grid/ProgramGrid";
 import { toast } from "sonner";
+import { useShallow } from "zustand/react/shallow";
 
 export function ProgramPage() {
   const { id } = useParams<{ id: string }>();
+
+  // Use shallow selector to avoid re-renders from unrelated store changes (isDirty, etc.)
   const {
     activeProgram,
     loadProgram,
@@ -18,6 +21,12 @@ export function ProgramPage() {
     addBlock,
     addMesocycle,
     addMicrocycle,
+    renameBlock,
+    renameMesocycle,
+    renameMicrocycle,
+    reorderBlocks,
+    reorderMesocycles,
+    reorderMicrocycles,
     deleteBlock,
     deleteMesocycle,
     deleteMicrocycle,
@@ -25,7 +34,34 @@ export function ProgramPage() {
     getActiveBlock,
     getActiveMesocycle,
     getActiveMicrocycle,
-  } = useProgramStore();
+  } = useProgramStore(
+    useShallow((s) => ({
+      activeProgram: s.activeProgram,
+      loadProgram: s.loadProgram,
+      activeBlockIndex: s.activeBlockIndex,
+      activeMesocycleIndex: s.activeMesocycleIndex,
+      activeMicrocycleId: s.activeMicrocycleId,
+      setActiveBlock: s.setActiveBlock,
+      setActiveMesocycle: s.setActiveMesocycle,
+      setActiveMicrocycle: s.setActiveMicrocycle,
+      addBlock: s.addBlock,
+      addMesocycle: s.addMesocycle,
+      addMicrocycle: s.addMicrocycle,
+      renameBlock: s.renameBlock,
+      renameMesocycle: s.renameMesocycle,
+      renameMicrocycle: s.renameMicrocycle,
+      reorderBlocks: s.reorderBlocks,
+      reorderMesocycles: s.reorderMesocycles,
+      reorderMicrocycles: s.reorderMicrocycles,
+      deleteBlock: s.deleteBlock,
+      deleteMesocycle: s.deleteMesocycle,
+      deleteMicrocycle: s.deleteMicrocycle,
+      duplicateMesocycle: s.duplicateMesocycle,
+      getActiveBlock: s.getActiveBlock,
+      getActiveMesocycle: s.getActiveMesocycle,
+      getActiveMicrocycle: s.getActiveMicrocycle,
+    })),
+  );
 
   useEffect(() => {
     if (id && id !== activeProgram?.id) {
@@ -65,6 +101,17 @@ export function ProgramPage() {
         items={activeProgram.blocks.map((b) => b.name)}
         activeIndex={activeBlockIndex}
         onSelect={setActiveBlock}
+        onRename={block ? (name) => {
+          renameBlock(block.id, name).catch((e) => toast.error(`${e}`));
+        } : undefined}
+        onReorder={(fromIdx, toIdx) => {
+          const ids = activeProgram.blocks.map((b) => b.id);
+          const [moved] = ids.splice(fromIdx, 1);
+          ids.splice(toIdx, 0, moved);
+          reorderBlocks(ids)
+            .then(() => setActiveBlock(toIdx))
+            .catch((e) => toast.error(`${e}`));
+        }}
         onAdd={() => {
           const name = `Block ${activeProgram.blocks.length + 1}`;
           addBlock(name).catch((e) => toast.error(`${e}`));
@@ -87,6 +134,17 @@ export function ProgramPage() {
           items={block.mesocycles.map((m) => m.name)}
           activeIndex={activeMesocycleIndex}
           onSelect={setActiveMesocycle}
+          onRename={mesocycle ? (name) => {
+            renameMesocycle(mesocycle.id, name).catch((e) => toast.error(`${e}`));
+          } : undefined}
+          onReorder={(fromIdx, toIdx) => {
+            const ids = block.mesocycles.map((m) => m.id);
+            const [moved] = ids.splice(fromIdx, 1);
+            ids.splice(toIdx, 0, moved);
+            reorderMesocycles(ids)
+              .then(() => setActiveMesocycle(toIdx))
+              .catch((e) => toast.error(`${e}`));
+          }}
           onAdd={() => {
             const weekNum = block.mesocycles.length + 1;
             addMesocycle(block.id, `Week ${weekNum}`, weekNum).catch((e) =>
@@ -119,6 +177,17 @@ export function ProgramPage() {
           items={mesocycle.microcycles.map((m) => m.name)}
           activeIndex={mesocycle.microcycles.findIndex((m) => m.id === activeMicrocycleId)}
           onSelect={(idx) => setActiveMicrocycle(mesocycle.microcycles[idx]?.id ?? null)}
+          onRename={microcycle ? (name) => {
+            renameMicrocycle(microcycle.id, name).catch((e) => toast.error(`${e}`));
+          } : undefined}
+          onReorder={(fromIdx, toIdx) => {
+            const ids = mesocycle.microcycles.map((m) => m.id);
+            const [moved] = ids.splice(fromIdx, 1);
+            ids.splice(toIdx, 0, moved);
+            reorderMicrocycles(ids)
+              .then(() => setActiveMicrocycle(ids[toIdx]))
+              .catch((e) => toast.error(`${e}`));
+          }}
           onAdd={() => {
             const dayNum = mesocycle.microcycles.length + 1;
             addMicrocycle(mesocycle.id, `Day ${dayNum}`, dayNum).catch((e) =>
@@ -153,7 +222,7 @@ export function ProgramPage() {
   );
 }
 
-/** Reusable horizontal tab bar */
+/** Reusable horizontal tab bar with double-click to rename and arrow buttons to reorder */
 function TabBar({
   label,
   items,
@@ -162,6 +231,8 @@ function TabBar({
   onAdd,
   onDelete,
   onDuplicate,
+  onRename,
+  onReorder,
 }: {
   label: string;
   items: string[];
@@ -170,7 +241,28 @@ function TabBar({
   onAdd: () => void;
   onDelete?: () => void;
   onDuplicate?: () => void;
+  onRename?: (newName: string) => void;
+  onReorder?: (fromIndex: number, toIndex: number) => void;
 }) {
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editingIndex !== null) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [editingIndex]);
+
+  const commitRename = () => {
+    const trimmed = editValue.trim();
+    if (trimmed && trimmed !== items[editingIndex!] && onRename) {
+      onRename(trimmed);
+    }
+    setEditingIndex(null);
+  };
+
   return (
     <div
       style={{
@@ -199,36 +291,88 @@ function TabBar({
 
       <div style={{ display: "flex", gap: 2, overflow: "auto", flex: 1 }}>
         {items.map((name, i) => (
-          <button
-            key={i}
-            onClick={() => onSelect(i)}
-            style={{
-              padding: "4px 12px",
-              borderRadius: 4,
-              border: "none",
-              fontSize: 12,
-              fontWeight: i === activeIndex ? 600 : 400,
-              background: i === activeIndex ? "var(--accent)" : "transparent",
-              color: i === activeIndex ? "#fff" : "var(--text-secondary)",
-              cursor: "pointer",
-              whiteSpace: "nowrap",
-              transition: "all 0.1s",
-            }}
-            onMouseEnter={(e) => {
-              if (i !== activeIndex)
-                e.currentTarget.style.background = "var(--bg-tertiary)";
-            }}
-            onMouseLeave={(e) => {
-              if (i !== activeIndex)
-                e.currentTarget.style.background = "transparent";
-            }}
-          >
-            {name}
-          </button>
+          editingIndex === i ? (
+            <input
+              key={i}
+              ref={inputRef}
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              onBlur={commitRename}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitRename();
+                if (e.key === "Escape") setEditingIndex(null);
+              }}
+              style={{
+                padding: "4px 8px",
+                borderRadius: 4,
+                border: "1px solid var(--accent)",
+                fontSize: 12,
+                fontWeight: 600,
+                background: "var(--bg-tertiary)",
+                color: "var(--text-primary)",
+                outline: "none",
+                width: Math.max(60, editValue.length * 8 + 20),
+              }}
+            />
+          ) : (
+            <button
+              key={i}
+              onClick={() => onSelect(i)}
+              onDoubleClick={() => {
+                if (i === activeIndex && onRename) {
+                  setEditingIndex(i);
+                  setEditValue(name);
+                }
+              }}
+              style={{
+                padding: "4px 12px",
+                borderRadius: 4,
+                border: "1px solid transparent",
+                fontSize: 12,
+                fontWeight: i === activeIndex ? 600 : 400,
+                background: i === activeIndex ? "var(--accent)" : "transparent",
+                color: i === activeIndex ? "#fff" : "var(--text-secondary)",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+                transition: "all 0.1s",
+              }}
+              onMouseEnter={(e) => {
+                if (i !== activeIndex)
+                  e.currentTarget.style.background = "var(--bg-tertiary)";
+              }}
+              onMouseLeave={(e) => {
+                if (i !== activeIndex)
+                  e.currentTarget.style.background = "transparent";
+              }}
+            >
+              {name}
+            </button>
+          )
         ))}
       </div>
 
       <div style={{ display: "flex", gap: 2, marginLeft: 4 }}>
+        {/* Move left/right buttons for reordering active tab */}
+        {onReorder && items.length > 1 && (
+          <>
+            <TabBarButton
+              label="&#x25C0;"
+              title="Move left"
+              onClick={() => {
+                if (activeIndex > 0) onReorder(activeIndex, activeIndex - 1);
+              }}
+              disabled={activeIndex <= 0}
+            />
+            <TabBarButton
+              label="&#x25B6;"
+              title="Move right"
+              onClick={() => {
+                if (activeIndex < items.length - 1) onReorder(activeIndex, activeIndex + 1);
+              }}
+              disabled={activeIndex >= items.length - 1}
+            />
+          </>
+        )}
         <TabBarButton label="+" title={`Add ${label.toLowerCase().slice(0, -1)}`} onClick={onAdd} />
         {onDuplicate && (
           <TabBarButton label="&#x2398;" title="Duplicate" onClick={onDuplicate} />
@@ -246,16 +390,19 @@ function TabBarButton({
   title,
   onClick,
   danger,
+  disabled,
 }: {
   label: string;
   title: string;
   onClick: () => void;
   danger?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <button
       title={title}
       onClick={onClick}
+      disabled={disabled}
       style={{
         width: 24,
         height: 24,
@@ -265,13 +412,14 @@ function TabBarButton({
         color: danger ? "var(--error)" : "var(--text-muted)",
         fontSize: 14,
         lineHeight: 1,
-        cursor: "pointer",
+        cursor: disabled ? "default" : "pointer",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
+        opacity: disabled ? 0.3 : 1,
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.background = "var(--bg-tertiary)";
+        if (!disabled) e.currentTarget.style.background = "var(--bg-tertiary)";
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.background = "transparent";

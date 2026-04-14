@@ -75,6 +75,20 @@ body {
   border-color: var(--accent) !important;
 }
 
+/* Allow inline cell editors to overflow (for dropdowns) */
+.ag-theme-alpine-dark .ag-cell-inline-editing {
+  overflow: visible !important;
+  z-index: 2;
+}
+
+.ag-theme-alpine-dark .ag-row {
+  z-index: auto;
+}
+
+.ag-theme-alpine-dark .ag-row-focus {
+  z-index: 1;
+}
+
 /* Button base styles */
 button {
   cursor: pointer;

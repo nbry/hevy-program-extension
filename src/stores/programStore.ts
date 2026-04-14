@@ -26,6 +26,12 @@ interface ProgramState {
   addBlock: (name: string) => Promise<void>;
   addMesocycle: (blockId: string, name: string, weekNumber: number) => Promise<void>;
   addMicrocycle: (mesocycleId: string, name: string, dayNumber: number) => Promise<void>;
+  renameBlock: (blockId: string, name: string) => Promise<void>;
+  renameMesocycle: (mesocycleId: string, name: string) => Promise<void>;
+  renameMicrocycle: (microcycleId: string, name: string) => Promise<void>;
+  reorderBlocks: (blockIds: string[]) => Promise<void>;
+  reorderMesocycles: (mesocycleIds: string[]) => Promise<void>;
+  reorderMicrocycles: (microcycleIds: string[]) => Promise<void>;
   deleteBlock: (blockId: string) => Promise<void>;
   deleteMesocycle: (mesocycleId: string) => Promise<void>;
   deleteMicrocycle: (microcycleId: string) => Promise<void>;
@@ -118,6 +124,36 @@ export const useProgramStore = create<ProgramState>((set, get) => ({
 
   addMicrocycle: async (mesocycleId, name, dayNumber) => {
     await api.addMicrocycle(mesocycleId, name, dayNumber);
+    await get().refreshActiveProgram();
+  },
+
+  renameBlock: async (blockId, name) => {
+    await api.renameBlock(blockId, name);
+    await get().refreshActiveProgram();
+  },
+
+  renameMesocycle: async (mesocycleId, name) => {
+    await api.renameMesocycle(mesocycleId, name);
+    await get().refreshActiveProgram();
+  },
+
+  renameMicrocycle: async (microcycleId, name) => {
+    await api.renameMicrocycle(microcycleId, name);
+    await get().refreshActiveProgram();
+  },
+
+  reorderBlocks: async (blockIds) => {
+    await api.reorderBlocks(blockIds);
+    await get().refreshActiveProgram();
+  },
+
+  reorderMesocycles: async (mesocycleIds) => {
+    await api.reorderMesocycles(mesocycleIds);
+    await get().refreshActiveProgram();
+  },
+
+  reorderMicrocycles: async (microcycleIds) => {
+    await api.reorderMicrocycles(microcycleIds);
     await get().refreshActiveProgram();
   },
 

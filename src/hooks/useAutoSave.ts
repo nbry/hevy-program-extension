@@ -1,8 +1,18 @@
-import { useRef, useCallback } from "react";
+import { useRef, useCallback, useEffect } from "react";
 
 export function useAutoSave(saveFn: () => Promise<void>, delayMs = 500) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savingRef = useRef(false);
+  // Always call the latest saveFn, not a stale closure
+  const saveFnRef = useRef(saveFn);
+  saveFnRef.current = saveFn;
+
+  // Clean up timer on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
 
   const trigger = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -10,12 +20,12 @@ export function useAutoSave(saveFn: () => Promise<void>, delayMs = 500) {
       if (savingRef.current) return;
       savingRef.current = true;
       try {
-        await saveFn();
+        await saveFnRef.current();
       } finally {
         savingRef.current = false;
       }
     }, delayMs);
-  }, [saveFn, delayMs]);
+  }, [delayMs]);
 
   const flush = useCallback(async () => {
     if (timerRef.current) {
@@ -25,11 +35,11 @@ export function useAutoSave(saveFn: () => Promise<void>, delayMs = 500) {
     if (savingRef.current) return;
     savingRef.current = true;
     try {
-      await saveFn();
+      await saveFnRef.current();
     } finally {
       savingRef.current = false;
     }
-  }, [saveFn]);
+  }, []);
 
   return { trigger, flush };
 }

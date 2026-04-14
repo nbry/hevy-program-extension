@@ -5,8 +5,14 @@ import type {
   ProgramSetInput,
 } from "../../types";
 
+let _rowCounter = 0;
+export function nextRowId(): string {
+  return `row_${++_rowCounter}_${Date.now()}`;
+}
+
 /** Flat row representation for AG Grid. One row = one exercise. */
 export interface GridRow {
+  id: string; // stable unique ID for AG Grid row tracking
   rowIndex: number;
   exerciseTemplateId: string;
   exerciseTitle: string;
@@ -28,6 +34,7 @@ export interface GridSet {
 /** Convert from backend ProgramExercise[] to GridRow[] */
 export function exercisesToGridRows(exercises: ProgramExercise[]): GridRow[] {
   return exercises.map((ex, i) => ({
+    id: nextRowId(),
     rowIndex: i,
     exerciseTemplateId: ex.exercise_template_id,
     exerciseTitle: ex.exercise_title,
@@ -45,11 +52,12 @@ export function exercisesToGridRows(exercises: ProgramExercise[]): GridRow[] {
   }));
 }
 
-/** Convert from GridRow[] back to ProgramExerciseInput[] for saving */
+/** Convert from GridRow[] back to ProgramExerciseInput[] for saving.
+ *  Rows without a valid exerciseTemplateId are filtered out. */
 export function gridRowsToExerciseInputs(
   rows: GridRow[],
 ): ProgramExerciseInput[] {
-  return rows.map((row, i) => ({
+  return rows.filter((row) => row.exerciseTemplateId).map((row, i) => ({
     exercise_template_id: row.exerciseTemplateId,
     sort_order: i,
     superset_group: null,

@@ -405,6 +405,111 @@ pub async fn add_microcycle(
 }
 
 #[tauri::command]
+pub async fn rename_block(
+    state: State<'_, Mutex<AppState>>,
+    id: String,
+    name: String,
+) -> Result<(), String> {
+    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    app_state
+        .db
+        .execute(
+            "UPDATE blocks SET name = ?1 WHERE id = ?2",
+            rusqlite::params![name, id],
+        )
+        .map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn rename_mesocycle(
+    state: State<'_, Mutex<AppState>>,
+    id: String,
+    name: String,
+) -> Result<(), String> {
+    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    app_state
+        .db
+        .execute(
+            "UPDATE mesocycles SET name = ?1 WHERE id = ?2",
+            rusqlite::params![name, id],
+        )
+        .map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn rename_microcycle(
+    state: State<'_, Mutex<AppState>>,
+    id: String,
+    name: String,
+) -> Result<(), String> {
+    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    app_state
+        .db
+        .execute(
+            "UPDATE microcycles SET name = ?1 WHERE id = ?2",
+            rusqlite::params![name, id],
+        )
+        .map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn reorder_blocks(
+    state: State<'_, Mutex<AppState>>,
+    block_ids: Vec<String>,
+) -> Result<(), String> {
+    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    for (i, id) in block_ids.iter().enumerate() {
+        app_state
+            .db
+            .execute(
+                "UPDATE blocks SET sort_order = ?1 WHERE id = ?2",
+                rusqlite::params![i as i32, id],
+            )
+            .map_err(|e| format!("DB error: {}", e))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn reorder_mesocycles(
+    state: State<'_, Mutex<AppState>>,
+    mesocycle_ids: Vec<String>,
+) -> Result<(), String> {
+    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    for (i, id) in mesocycle_ids.iter().enumerate() {
+        app_state
+            .db
+            .execute(
+                "UPDATE mesocycles SET sort_order = ?1 WHERE id = ?2",
+                rusqlite::params![i as i32, id],
+            )
+            .map_err(|e| format!("DB error: {}", e))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn reorder_microcycles(
+    state: State<'_, Mutex<AppState>>,
+    microcycle_ids: Vec<String>,
+) -> Result<(), String> {
+    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    for (i, id) in microcycle_ids.iter().enumerate() {
+        app_state
+            .db
+            .execute(
+                "UPDATE microcycles SET sort_order = ?1 WHERE id = ?2",
+                rusqlite::params![i as i32, id],
+            )
+            .map_err(|e| format!("DB error: {}", e))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn delete_block(
     state: State<'_, Mutex<AppState>>,
     id: String,
@@ -527,61 +632,88 @@ pub async fn save_microcycle_exercises(
 ) -> Result<(), String> {
     let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
 
-    // Delete existing exercises (cascade deletes sets)
+    // Use a transaction so DELETE+INSERT is atomic
     app_state
         .db
-        .execute(
-            "DELETE FROM program_exercises WHERE microcycle_id = ?1",
-            rusqlite::params![microcycle_id],
-        )
+        .execute("BEGIN", [])
         .map_err(|e| format!("DB error: {}", e))?;
 
-    // Insert all exercises and sets
-    for exercise in &exercises {
-        let ex_id = Uuid::new_v4().to_string();
+    let result = (|| -> Result<(), String> {
+        // Delete existing exercises (cascade deletes sets)
         app_state
             .db
             .execute(
-                "INSERT INTO program_exercises (id, microcycle_id, exercise_template_id, sort_order, superset_group, rest_seconds, notes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                rusqlite::params![
-                    ex_id,
-                    microcycle_id,
-                    exercise.exercise_template_id,
-                    exercise.sort_order,
-                    exercise.superset_group,
-                    exercise.rest_seconds,
-                    exercise.notes,
-                ],
+                "DELETE FROM program_exercises WHERE microcycle_id = ?1",
+                rusqlite::params![microcycle_id],
             )
             .map_err(|e| format!("DB error: {}", e))?;
 
-        for set in &exercise.sets {
-            let set_id = Uuid::new_v4().to_string();
+        // Insert all exercises and sets
+        for exercise in &exercises {
+            // Skip exercises without a valid template ID
+            if exercise.exercise_template_id.is_empty() {
+                continue;
+            }
+
+            let ex_id = Uuid::new_v4().to_string();
             app_state
                 .db
                 .execute(
-                    "INSERT INTO program_sets (id, program_exercise_id, sort_order, set_type, reps, rep_range_start, rep_range_end, weight_kg, percentage_of_tm, rpe_target, duration_seconds, distance_meters, custom_metric) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                    "INSERT INTO program_exercises (id, microcycle_id, exercise_template_id, sort_order, superset_group, rest_seconds, notes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                     rusqlite::params![
-                        set_id,
                         ex_id,
-                        set.sort_order,
-                        set.set_type,
-                        set.reps,
-                        set.rep_range_start,
-                        set.rep_range_end,
-                        set.weight_kg,
-                        set.percentage_of_tm,
-                        set.rpe_target,
-                        set.duration_seconds,
-                        set.distance_meters,
-                        set.custom_metric,
+                        microcycle_id,
+                        exercise.exercise_template_id,
+                        exercise.sort_order,
+                        exercise.superset_group,
+                        exercise.rest_seconds,
+                        exercise.notes,
                     ],
                 )
                 .map_err(|e| format!("DB error: {}", e))?;
+
+            for set in &exercise.sets {
+                let set_id = Uuid::new_v4().to_string();
+                app_state
+                    .db
+                    .execute(
+                        "INSERT INTO program_sets (id, program_exercise_id, sort_order, set_type, reps, rep_range_start, rep_range_end, weight_kg, percentage_of_tm, rpe_target, duration_seconds, distance_meters, custom_metric) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                        rusqlite::params![
+                            set_id,
+                            ex_id,
+                            set.sort_order,
+                            set.set_type,
+                            set.reps,
+                            set.rep_range_start,
+                            set.rep_range_end,
+                            set.weight_kg,
+                            set.percentage_of_tm,
+                            set.rpe_target,
+                            set.duration_seconds,
+                            set.distance_meters,
+                            set.custom_metric,
+                        ],
+                    )
+                    .map_err(|e| format!("DB error: {}", e))?;
+            }
+        }
+
+        Ok(())
+    })();
+
+    match result {
+        Ok(()) => {
+            app_state
+                .db
+                .execute("COMMIT", [])
+                .map_err(|e| format!("DB error: {}", e))?;
+            Ok(())
+        }
+        Err(e) => {
+            let _ = app_state.db.execute("ROLLBACK", []);
+            Err(e)
         }
     }
-
-    Ok(())
 }
 
 #[tauri::command]

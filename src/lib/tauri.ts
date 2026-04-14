@@ -129,6 +129,40 @@ export async function deleteMicrocycle(id: string): Promise<void> {
   return invoke("delete_microcycle", { id });
 }
 
+export async function renameBlock(id: string, name: string): Promise<void> {
+  return invoke("rename_block", { id, name });
+}
+
+export async function renameMesocycle(
+  id: string,
+  name: string,
+): Promise<void> {
+  return invoke("rename_mesocycle", { id, name });
+}
+
+export async function renameMicrocycle(
+  id: string,
+  name: string,
+): Promise<void> {
+  return invoke("rename_microcycle", { id, name });
+}
+
+export async function reorderBlocks(blockIds: string[]): Promise<void> {
+  return invoke("reorder_blocks", { blockIds });
+}
+
+export async function reorderMesocycles(
+  mesocycleIds: string[],
+): Promise<void> {
+  return invoke("reorder_mesocycles", { mesocycleIds });
+}
+
+export async function reorderMicrocycles(
+  microcycleIds: string[],
+): Promise<void> {
+  return invoke("reorder_microcycles", { microcycleIds });
+}
+
 export async function duplicateMesocycle(
   mesocycleId: string,
 ): Promise<{ id: string }> {
