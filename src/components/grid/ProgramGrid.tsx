@@ -5,17 +5,16 @@ import {
   ModuleRegistry,
   type ColDef,
   type CellValueChangedEvent,
-  type CellEditingStoppedEvent,
   type GridReadyEvent,
   type GridApi,
-  type RowDragEndEvent,
+  type ICellRendererParams,
 } from "ag-grid-community";
 import {
   type GridRow,
+  type GridSet,
   exercisesToGridRows,
   gridRowsToExerciseInputs,
   formatSet,
-  parseSetString,
   defaultSet,
   getMaxSets,
   nextRowId,
@@ -131,6 +130,10 @@ export function ProgramGrid({ microcycle }: Props) {
     [scheduleSave],
   );
 
+  // Stable ref for set commit callback (used in columnDefs without triggering re-memo)
+  const updateRowByIdRef = useRef(updateRowById);
+  updateRowByIdRef.current = updateRowById;
+
   const onCellValueChanged = useCallback(
     (event: CellValueChangedEvent) => {
       const { data, colDef } = event;
@@ -159,58 +162,28 @@ export function ProgramGrid({ microcycle }: Props) {
         }));
       } else if (field === "notes") {
         updateRowById(rowId, (r) => ({ ...r, notes: event.newValue || null }));
-      } else if (field.startsWith("set_")) {
-        const setIdx = parseInt(field.replace("set_", ""));
-        const parsed = parseSetString(event.newValue || "", unitSystem);
-        console.log("[ProgramGrid] Set parsed:", parsed);
-        updateRowById(rowId, (r) => {
-          const newSets = [...r.sets];
-          while (newSets.length <= setIdx) newSets.push(defaultSet());
-          if (parsed) {
-            newSets[setIdx] = parsed;
-          } else {
-            newSets.splice(setIdx, 1);
-          }
-          return { ...r, sets: newSets };
-        });
       }
+      // Note: set_* columns are handled via direct onCommit callback, not through
+      // AG Grid's value pipeline (which is broken for popup/inline-overlay editors in v35).
     },
-    [templatesByTitle, unitSystem, updateRowById],
-  );
-
-  // Backup: if onCellValueChanged doesn't fire, use onCellEditingStopped
-  // to detect when the exercise editor finishes
-  const onCellEditingStopped = useCallback(
-    (event: CellEditingStoppedEvent) => {
-      const field = event.colDef.field;
-      if (field === "exerciseTitle" && !event.valueChanged) {
-        // AG Grid says value didn't change, but let's check manually
-        const currentVal = event.data?.exerciseTitle;
-        console.log("[ProgramGrid] onCellEditingStopped (no change detected):", field,
-          "currentVal:", currentVal);
-      }
-    },
-    [],
+    [templatesByTitle, updateRowById],
   );
 
   // Build column definitions
   const columnDefs = useMemo((): ColDef[] => {
     const cols: ColDef[] = [
       {
-        headerName: "",
-        width: 40,
-        rowDrag: true,
-        editable: false,
-        suppressMovable: true,
-        cellStyle: { cursor: "grab" },
-      },
-      {
         headerName: "#",
         valueGetter: (p) => (p.node?.rowIndex ?? 0) + 1,
-        width: 44,
+        width: 48,
         editable: false,
         suppressMovable: true,
-        cellStyle: { color: "var(--text-muted)", textAlign: "center" },
+        rowDrag: true,
+        cellStyle: {
+          color: "var(--text-muted)",
+          textAlign: "center",
+          cursor: "grab",
+        },
       },
       {
         field: "exerciseTitle",
@@ -228,26 +201,84 @@ export function ProgramGrid({ microcycle }: Props) {
       cols.push({
         field: `set_${i}`,
         headerName: `Set ${i + 1}`,
-        width: 130,
+        width: 150,
         editable: true,
         cellEditor: SetsCellEditor,
-        cellEditorPopup: true,
+        cellEditorParams: {
+          onCommit: (rowId: string, setIdx: number, gridSet: GridSet | null) => {
+            updateRowByIdRef.current(rowId, (r) => {
+              const newSets = [...r.sets];
+              while (newSets.length <= setIdx) newSets.push(defaultSet());
+              if (gridSet) {
+                newSets[setIdx] = gridSet;
+              } else {
+                newSets.splice(setIdx, 1);
+              }
+              return { ...r, sets: newSets };
+            });
+          },
+        },
         valueGetter: (params) => {
           const row = params.data as GridRow;
           if (!row || !row.sets[i]) return "";
           return formatSet(row.sets[i], unitSystem);
         },
-        valueSetter: (params) => {
-          params.data[`set_${i}`] = params.newValue;
-          return true;
-        },
-        cellStyle: (params) => {
+        cellRenderer: (params: ICellRendererParams) => {
           const row = params.data as GridRow;
           const s = row?.sets[i];
-          if (!s) return { color: "var(--text-muted)" };
-          if (s.setType === "warmup") return { color: "var(--warning)" };
-          if (s.percentageOfTm != null) return { color: "var(--accent-hover)" };
-          return null;
+          if (!s || (!s.reps && !s.repRangeStart && !s.weightKg && !s.percentageOfTm && !s.rpeTarget)) {
+            return null;
+          }
+
+          // Calculate badge label
+          let badgeLabel: string | null = null;
+          let badgeColor: string | null = null;
+
+          if (s.setType === "warmup") {
+            badgeLabel = "W";
+            badgeColor = "#f59e0b";
+          } else if (s.setType === "failure") {
+            badgeLabel = "F";
+            badgeColor = "#ef4444";
+          } else if (s.setType === "dropset") {
+            badgeLabel = "D";
+            badgeColor = "#a855f7";
+          } else {
+            // Normal: sequential number counting only normal sets up to this index
+            let normalCount = 0;
+            for (let j = 0; j <= i; j++) {
+              const sj = row.sets[j];
+              if (sj && (sj.reps || sj.repRangeStart || sj.weightKg || sj.percentageOfTm || sj.rpeTarget)) {
+                if (sj.setType === "normal") normalCount++;
+              }
+            }
+            badgeLabel = String(normalCount);
+            badgeColor = "var(--accent)";
+          }
+
+          const textColor = s.percentageOfTm != null ? "var(--accent-hover)" : "var(--text-primary)";
+
+          return (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, height: "100%" }}>
+              <span style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 18,
+                height: 18,
+                borderRadius: 3,
+                fontSize: 10,
+                fontWeight: 700,
+                background: badgeColor,
+                color: "#fff",
+                flexShrink: 0,
+                lineHeight: 1,
+              }}>
+                {badgeLabel}
+              </span>
+              <span style={{ color: textColor }}>{params.value}</span>
+            </div>
+          );
         },
       });
     }
@@ -255,7 +286,7 @@ export function ProgramGrid({ microcycle }: Props) {
     cols.push(
       {
         field: "restSeconds",
-        headerName: "Rest",
+        headerName: "Rest (s)",
         width: 80,
         editable: true,
         valueFormatter: (p) => (p.value ? `${p.value}s` : ""),
@@ -318,21 +349,15 @@ export function ProgramGrid({ microcycle }: Props) {
     setSetColumnCount((prev) => prev + 1);
   }, []);
 
-  // Handle row reorder via drag
+  // Handle row reorder via drag — read AG Grid's actual display order
   const onRowDragEnd = useCallback(
-    (event: RowDragEndEvent) => {
-      const fromIndex = event.node.data.rowIndex as number;
-      const toNode = event.overNode;
-      if (!toNode) return;
-      const toIndex = toNode.data.rowIndex as number;
-      if (fromIndex === toIndex) return;
-
-      setRows((prev) => {
-        const next = [...prev];
-        const [moved] = next.splice(fromIndex, 1);
-        next.splice(toIndex, 0, moved);
-        return next.map((r, i) => ({ ...r, rowIndex: i }));
+    () => {
+      if (!gridApiRef.current) return;
+      const newOrder: GridRow[] = [];
+      gridApiRef.current.forEachNodeAfterFilterAndSort((node) => {
+        newOrder.push(node.data as GridRow);
       });
+      setRows(newOrder.map((r, i) => ({ ...r, rowIndex: i })));
       scheduleSave();
     },
     [scheduleSave],
@@ -425,7 +450,6 @@ export function ProgramGrid({ microcycle }: Props) {
           columnDefs={columnDefs}
           onGridReady={onGridReady}
           onCellValueChanged={onCellValueChanged}
-          onCellEditingStopped={onCellEditingStopped}
           onRowDragEnd={onRowDragEnd}
           rowSelection="single"
           getRowId={(params) => params.data.id}

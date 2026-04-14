@@ -167,6 +167,17 @@ input:focus, textarea:focus {
   border-color: var(--accent);
 }
 
+/* Force dark background on select/option elements (Tauri WebView) */
+select {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+option {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
 input::placeholder, textarea::placeholder {
   color: var(--text-muted);
 }

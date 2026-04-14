@@ -100,9 +100,11 @@ export function formatSet(
     parts.push(`${Math.round(s.percentageOfTm * 100)}%`);
   } else if (s.weightKg != null) {
     if (unitSystem === "imperial") {
-      parts.push(`${Math.round(s.weightKg * 2.20462 * 10) / 10}lbs`);
+      const lbs = Math.round(s.weightKg * 2.20462 * 100) / 100;
+      parts.push(`${Number.isInteger(lbs) ? lbs : parseFloat(lbs.toFixed(1))}lbs`);
     } else {
-      parts.push(`${Math.round(s.weightKg * 10) / 10}kg`);
+      const kg = Math.round(s.weightKg * 100) / 100;
+      parts.push(`${Number.isInteger(kg) ? kg : parseFloat(kg.toFixed(1))}kg`);
     }
   }
 
@@ -180,7 +182,7 @@ export function parseSetString(
           (unitSystem === "imperial" &&
             !weightPart.toLowerCase().includes("kg"))
         ) {
-          val = Math.round((val / 2.20462) * 10) / 10; // convert to kg
+          val = Math.round((val / 2.20462) * 10000) / 10000; // convert to kg
         }
         result.weightKg = val;
       }

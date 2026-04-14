@@ -1,5 +1,7 @@
 # Hevy Program Extension
 
+🚧 Under Construction 🚧
+
 A desktop application for designing long-term workout programs and syncing them to [Hevy](https://hevy.com). Built for strength athletes, powerlifters, and coaches who need to plan structured training blocks with percentage-based programming.
 
 ## What It Does
