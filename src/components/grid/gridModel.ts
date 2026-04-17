@@ -4,6 +4,7 @@ import type {
   ProgramExerciseInput,
   ProgramSetInput,
 } from "../../types";
+import type { ExerciseType } from "../../types/exercise";
 
 let _rowCounter = 0;
 export function nextRowId(): string {
@@ -29,6 +30,8 @@ export interface GridSet {
   weightKg: number | null;
   percentageOfTm: number | null;
   rpeTarget: number | null;
+  durationSeconds: number | null;
+  distanceMeters: number | null;
 }
 
 /** Convert from backend ProgramExercise[] to GridRow[] */
@@ -48,6 +51,8 @@ export function exercisesToGridRows(exercises: ProgramExercise[]): GridRow[] {
       weightKg: s.weight_kg,
       percentageOfTm: s.percentage_of_tm,
       rpeTarget: s.rpe_target,
+      durationSeconds: s.duration_seconds,
+      distanceMeters: s.distance_meters,
     })),
   }));
 }
@@ -75,17 +80,80 @@ export function gridRowsToExerciseInputs(
           weight_kg: s.weightKg,
           percentage_of_tm: s.percentageOfTm,
           rpe_target: s.rpeTarget,
-          duration_seconds: null,
-          distance_meters: null,
+          duration_seconds: s.durationSeconds,
+          distance_meters: s.distanceMeters,
           custom_metric: null,
         }),
       ),
     }));
 }
 
-/** Format a set for compact display: "5x85%" or "8-12x70kg" or "10 @8"
+/** Format a set for compact display based on exercise type.
+ *  weight_reps: "5 x 135lbs @8"
+ *  duration: "60s"
+ *  distance_duration: "5km / 25:00"
+ *  weight_duration: "70kg x 60s"
  *  If resolvedWeightDisplay is provided, appends it after % sets: "5 x 85% (187lb)" */
 export function formatSet(
+  s: GridSet,
+  unitSystem: "metric" | "imperial",
+  resolvedWeightDisplay?: string,
+  exerciseType?: ExerciseType,
+): string {
+  // Duration-only exercises (plank, etc.)
+  if (exerciseType === "duration") {
+    if (s.durationSeconds == null) return "";
+    return formatDuration(s.durationSeconds);
+  }
+
+  // Distance + duration exercises (rowing, running, etc.)
+  if (exerciseType === "distance_duration") {
+    const parts: string[] = [];
+    if (s.distanceMeters != null) parts.push(formatDistance(s.distanceMeters, unitSystem));
+    if (s.durationSeconds != null) parts.push(formatDuration(s.durationSeconds));
+    return parts.join(" / ") || "";
+  }
+
+  // Weight + duration exercises (farmer's carry, etc.)
+  if (exerciseType === "weight_duration") {
+    const parts: string[] = [];
+    if (s.weightKg != null) {
+      parts.push(formatWeightValue(s.weightKg, unitSystem));
+    }
+    if (s.durationSeconds != null) parts.push(formatDuration(s.durationSeconds));
+    return parts.join(" x ") || "";
+  }
+
+  // Short distance + weight (sled push, etc.)
+  if (exerciseType === "short_distance_weight") {
+    const parts: string[] = [];
+    if (s.distanceMeters != null) parts.push(formatDistance(s.distanceMeters, unitSystem));
+    if (s.weightKg != null) parts.push(formatWeightValue(s.weightKg, unitSystem));
+    return parts.join(" x ") || "";
+  }
+
+  // Reps-only / bodyweight exercises
+  if (exerciseType === "reps_only" || exerciseType === "bodyweight_reps" || exerciseType === "bodyweight_assisted_reps") {
+    const parts: string[] = [];
+    if (s.repRangeStart != null && s.repRangeEnd != null) {
+      parts.push(`${s.repRangeStart}-${s.repRangeEnd}`);
+    } else if (s.reps != null) {
+      parts.push(`${s.reps}`);
+    }
+    // Bodyweight-assisted can have weight (the assist weight)
+    if (exerciseType === "bodyweight_assisted_reps" && s.weightKg != null) {
+      parts.push(formatWeightValue(s.weightKg, unitSystem));
+    }
+    if (s.rpeTarget != null) parts.push(`@${s.rpeTarget}`);
+    if (parts.length <= 1) return parts[0] ?? "";
+    return parts.join(" x ");
+  }
+
+  // Default: weight_reps (original logic)
+  return formatWeightRepsSet(s, unitSystem, resolvedWeightDisplay);
+}
+
+function formatWeightRepsSet(
   s: GridSet,
   unitSystem: "metric" | "imperial",
   resolvedWeightDisplay?: string,
@@ -103,15 +171,7 @@ export function formatSet(
   if (s.percentageOfTm != null) {
     parts.push(`${Math.round(s.percentageOfTm * 100)}%`);
   } else if (s.weightKg != null) {
-    if (unitSystem === "imperial") {
-      const lbs = Math.round(s.weightKg * 2.20462 * 100) / 100;
-      parts.push(
-        `${Number.isInteger(lbs) ? lbs : parseFloat(lbs.toFixed(1))}lbs`,
-      );
-    } else {
-      const kg = Math.round(s.weightKg * 100) / 100;
-      parts.push(`${Number.isInteger(kg) ? kg : parseFloat(kg.toFixed(1))}kg`);
-    }
+    parts.push(formatWeightValue(s.weightKg, unitSystem));
   }
 
   // RPE part
@@ -134,6 +194,34 @@ export function formatSet(
   return parts.join(" ");
 }
 
+function formatWeightValue(kg: number, unitSystem: "metric" | "imperial"): string {
+  if (unitSystem === "imperial") {
+    const lbs = Math.round(kg * 2.20462);
+    return `${lbs}lbs`;
+  }
+  const rounded = Math.round(kg * 10) / 10;
+  return `${rounded}kg`;
+}
+
+function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const min = Math.floor(seconds / 60);
+  const sec = seconds % 60;
+  if (sec === 0) return `${min}:00`;
+  return `${min}:${sec.toString().padStart(2, "0")}`;
+}
+
+function formatDistance(meters: number, unitSystem: "metric" | "imperial"): string {
+  if (unitSystem === "imperial") {
+    const miles = meters / 1609.344;
+    if (miles >= 0.1) return `${Math.round(miles * 100) / 100}mi`;
+    const yards = meters * 1.09361;
+    return `${Math.round(yards)}yd`;
+  }
+  if (meters >= 1000) return `${Math.round(meters / 100) / 10}km`;
+  return `${Math.round(meters)}m`;
+}
+
 /** Parse a compact set string back into a GridSet */
 export function parseSetString(
   input: string,
@@ -150,6 +238,8 @@ export function parseSetString(
     weightKg: null,
     percentageOfTm: null,
     rpeTarget: null,
+    durationSeconds: null,
+    distanceMeters: null,
   };
 
   // Extract RPE: @8, @9.5
@@ -212,6 +302,8 @@ export function defaultSet(): GridSet {
     weightKg: null,
     percentageOfTm: null,
     rpeTarget: null,
+    durationSeconds: null,
+    distanceMeters: null,
   };
 }
 

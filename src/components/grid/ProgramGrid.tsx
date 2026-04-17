@@ -287,7 +287,7 @@ export function ProgramGrid({ microcycle }: Props) {
             }
           }
 
-          return formatSet(s, unitSystem, resolvedDisplay);
+          return formatSet(s, unitSystem, resolvedDisplay, templatesById.get(row.exerciseTemplateId)?.exercise_type);
         },
         cellRenderer: (params: ICellRendererParams) => {
           const row = params.data as GridRow;
@@ -298,7 +298,9 @@ export function ProgramGrid({ microcycle }: Props) {
               !s.repRangeStart &&
               !s.weightKg &&
               !s.percentageOfTm &&
-              !s.rpeTarget)
+              !s.rpeTarget &&
+              !s.durationSeconds &&
+              !s.distanceMeters)
           ) {
             return null;
           }
@@ -327,7 +329,9 @@ export function ProgramGrid({ microcycle }: Props) {
                   sj.repRangeStart ||
                   sj.weightKg ||
                   sj.percentageOfTm ||
-                  sj.rpeTarget)
+                  sj.rpeTarget ||
+                  sj.durationSeconds ||
+                  sj.distanceMeters)
               ) {
                 if (sj.setType === "normal") normalCount++;
               }
