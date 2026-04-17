@@ -117,11 +117,19 @@ fn collect_microcycles(
 ) -> Result<Vec<MicrocycleInfo>, String> {
     let mut stmt = db
         .prepare(
-            "SELECT mi.id, mi.name, mi.day_number, me.week_number
+            "SELECT mi.id, mi.name, mi.day_number,
+                    (SELECT COUNT(*) FROM mesocycles me2
+                     JOIN blocks b2 ON b2.id = me2.block_id
+                     WHERE b2.program_id = b.program_id
+                       AND me2.mirror_of IS NULL
+                       AND (b2.sort_order < b.sort_order
+                            OR (b2.sort_order = b.sort_order AND me2.sort_order <= me.sort_order))
+                    ) AS computed_week_number
              FROM microcycles mi
              JOIN mesocycles me ON me.id = mi.mesocycle_id
              JOIN blocks b ON b.id = me.block_id
              WHERE b.program_id = ?1
+               AND me.mirror_of IS NULL
              ORDER BY b.sort_order, me.sort_order, mi.sort_order",
         )
         .map_err(|e| format!("DB error: {}", e))?;

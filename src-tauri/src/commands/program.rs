@@ -118,7 +118,7 @@ pub async fn get_program(
     for block in &mut blocks {
         let mut meso_stmt = app_state
             .db
-            .prepare("SELECT id, block_id, name, week_number, sort_order, created_at, updated_at FROM mesocycles WHERE block_id = ?1 ORDER BY sort_order")
+            .prepare("SELECT id, block_id, name, week_number, sort_order, mirror_of, created_at, updated_at FROM mesocycles WHERE block_id = ?1 ORDER BY sort_order")
             .map_err(|e| format!("DB error: {}", e))?;
 
         let mut mesocycles: Vec<Mesocycle> = meso_stmt
@@ -129,9 +129,10 @@ pub async fn get_program(
                     name: row.get(2)?,
                     week_number: row.get(3)?,
                     sort_order: row.get(4)?,
+                    mirror_of: row.get(5)?,
                     microcycles: Vec::new(),
-                    created_at: row.get(5)?,
-                    updated_at: row.get(6)?,
+                    created_at: row.get(6)?,
+                    updated_at: row.get(7)?,
                 })
             })
             .map_err(|e| format!("DB error: {}", e))?
@@ -225,6 +226,23 @@ pub async fn get_program(
         }
 
         block.mesocycles = mesocycles;
+    }
+
+    // Resolve mirrors: copy source mesocycle's microcycles into mirrored mesocycles
+    let all_microcycles: std::collections::HashMap<String, Vec<Microcycle>> = blocks
+        .iter()
+        .flat_map(|b| b.mesocycles.iter())
+        .map(|m| (m.id.clone(), m.microcycles.clone()))
+        .collect();
+
+    for block in &mut blocks {
+        for meso in &mut block.mesocycles {
+            if let Some(ref source_id) = meso.mirror_of {
+                if let Some(source_micros) = all_microcycles.get(source_id) {
+                    meso.microcycles = source_micros.clone();
+                }
+            }
+        }
     }
 
     Ok(ProgramFull { blocks, ..program })
@@ -506,6 +524,105 @@ pub async fn reorder_microcycles(
             )
             .map_err(|e| format!("DB error: {}", e))?;
     }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn move_microcycle(
+    state: State<'_, Mutex<AppState>>,
+    microcycle_id: String,
+    target_mesocycle_id: String,
+) -> Result<(), String> {
+    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+
+    // Verify target mesocycle exists
+    let _: String = app_state
+        .db
+        .query_row(
+            "SELECT id FROM mesocycles WHERE id = ?1",
+            rusqlite::params![target_mesocycle_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("Target mesocycle not found: {}", e))?;
+
+    // Get the next sort_order for the target mesocycle
+    let max_order: i32 = app_state
+        .db
+        .query_row(
+            "SELECT COALESCE(MAX(sort_order), -1) FROM microcycles WHERE mesocycle_id = ?1",
+            rusqlite::params![target_mesocycle_id],
+            |row| row.get(0),
+        )
+        .unwrap_or(-1);
+
+    // Update the microcycle's mesocycle_id and sort_order
+    app_state
+        .db
+        .execute(
+            "UPDATE microcycles SET mesocycle_id = ?1, sort_order = ?2, updated_at = datetime('now') WHERE id = ?3",
+            rusqlite::params![target_mesocycle_id, max_order + 1, microcycle_id],
+        )
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_mesocycle_mirror(
+    state: State<'_, Mutex<AppState>>,
+    mesocycle_id: String,
+    mirror_of: Option<String>,
+) -> Result<(), String> {
+    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+
+    if let Some(ref source_id) = mirror_of {
+        // Cannot mirror itself
+        if source_id == &mesocycle_id {
+            return Err("A mesocycle cannot mirror itself".to_string());
+        }
+
+        // Verify source exists
+        let _: String = app_state
+            .db
+            .query_row(
+                "SELECT id FROM mesocycles WHERE id = ?1",
+                rusqlite::params![source_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("Source mesocycle not found: {}", e))?;
+
+        // Prevent mirroring a mesocycle that is itself a mirror
+        let source_mirror: Option<String> = app_state
+            .db
+            .query_row(
+                "SELECT mirror_of FROM mesocycles WHERE id = ?1",
+                rusqlite::params![source_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("DB error: {}", e))?;
+
+        if source_mirror.is_some() {
+            return Err("Cannot mirror a mesocycle that is itself a mirror".to_string());
+        }
+
+        // Delete existing microcycles from the mirror mesocycle
+        app_state
+            .db
+            .execute(
+                "DELETE FROM microcycles WHERE mesocycle_id = ?1",
+                rusqlite::params![mesocycle_id],
+            )
+            .map_err(|e| format!("DB error: {}", e))?;
+    }
+
+    app_state
+        .db
+        .execute(
+            "UPDATE mesocycles SET mirror_of = ?1, updated_at = datetime('now') WHERE id = ?2",
+            rusqlite::params![mirror_of, mesocycle_id],
+        )
+        .map_err(|e| format!("DB error: {}", e))?;
+
     Ok(())
 }
 

@@ -53,6 +53,8 @@ interface ProgramState {
   reorderBlocks: (blockIds: string[]) => Promise<void>;
   reorderMesocycles: (mesocycleIds: string[]) => Promise<void>;
   reorderMicrocycles: (microcycleIds: string[]) => Promise<void>;
+  moveMicrocycle: (microcycleId: string, targetMesocycleId: string) => Promise<void>;
+  setMesocycleMirror: (mesocycleId: string, mirrorOf: string | null) => Promise<void>;
   deleteBlock: (blockId: string) => Promise<void>;
   deleteMesocycle: (mesocycleId: string) => Promise<void>;
   deleteMicrocycle: (microcycleId: string) => Promise<void>;
@@ -195,6 +197,31 @@ export const useProgramStore = create<ProgramState>((set, get) => ({
 
   reorderMicrocycles: async (microcycleIds) => {
     await api.reorderMicrocycles(microcycleIds);
+    await get().refreshActiveProgram();
+  },
+
+  moveMicrocycle: async (microcycleId, targetMesocycleId) => {
+    await api.moveMicrocycle(microcycleId, targetMesocycleId);
+    await get().refreshActiveProgram();
+    // Navigate to the target mesocycle
+    const { activeProgram } = get();
+    if (!activeProgram) return;
+    for (let bi = 0; bi < activeProgram.blocks.length; bi++) {
+      for (let mi = 0; mi < activeProgram.blocks[bi].mesocycles.length; mi++) {
+        if (activeProgram.blocks[bi].mesocycles[mi].id === targetMesocycleId) {
+          set({
+            activeBlockIndex: bi,
+            activeMesocycleIndex: mi,
+            activeMicrocycleId: microcycleId,
+          });
+          return;
+        }
+      }
+    }
+  },
+
+  setMesocycleMirror: async (mesocycleId, mirrorOf) => {
+    await api.setMesocycleMirror(mesocycleId, mirrorOf);
     await get().refreshActiveProgram();
   },
 

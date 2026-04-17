@@ -27,6 +27,7 @@ pub struct Mesocycle {
     pub name: String,
     pub week_number: i32,
     pub sort_order: i32,
+    pub mirror_of: Option<String>,
     pub microcycles: Vec<Microcycle>,
     pub created_at: String,
     pub updated_at: String,

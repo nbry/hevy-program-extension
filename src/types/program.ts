@@ -24,6 +24,7 @@ export interface Mesocycle {
   name: string;
   week_number: number;
   sort_order: number;
+  mirror_of: string | null;
   microcycles: Microcycle[];
   created_at: string;
   updated_at: string;

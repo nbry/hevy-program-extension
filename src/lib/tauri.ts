@@ -188,6 +188,20 @@ export async function reorderMicrocycles(
   return invoke("reorder_microcycles", { microcycleIds });
 }
 
+export async function moveMicrocycle(
+  microcycleId: string,
+  targetMesocycleId: string,
+): Promise<void> {
+  return invoke("move_microcycle", { microcycleId, targetMesocycleId });
+}
+
+export async function setMesocycleMirror(
+  mesocycleId: string,
+  mirrorOf: string | null,
+): Promise<void> {
+  return invoke("set_mesocycle_mirror", { mesocycleId, mirrorOf });
+}
+
 export async function duplicateMesocycle(
   mesocycleId: string,
 ): Promise<{ id: string }> {

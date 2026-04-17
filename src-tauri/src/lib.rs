@@ -66,6 +66,8 @@ pub fn run() {
             commands::program::reorder_blocks,
             commands::program::reorder_mesocycles,
             commands::program::reorder_microcycles,
+            commands::program::move_microcycle,
+            commands::program::set_mesocycle_mirror,
             commands::program::delete_block,
             commands::program::delete_mesocycle,
             commands::program::delete_microcycle,

@@ -43,6 +43,8 @@ export function ProgramPage() {
     getActiveBlock,
     getActiveMesocycle,
     getActiveMicrocycle,
+    moveMicrocycle,
+    setMesocycleMirror,
     syncStatus,
     loadSyncStatus,
   } = useProgramStore(
@@ -72,6 +74,8 @@ export function ProgramPage() {
       getActiveBlock: s.getActiveBlock,
       getActiveMesocycle: s.getActiveMesocycle,
       getActiveMicrocycle: s.getActiveMicrocycle,
+      moveMicrocycle: s.moveMicrocycle,
+      setMesocycleMirror: s.setMesocycleMirror,
       syncStatus: s.syncStatus,
       loadSyncStatus: s.loadSyncStatus,
     })),
@@ -178,11 +182,13 @@ export function ProgramPage() {
         label: "Rename",
         onClick: () => setActiveMesocycle(index),
       });
-      items.push({
-        label: "Duplicate",
-        onClick: () =>
-          duplicateMesocycle(m.id).catch((e) => toast.error(`${e}`)),
-      });
+      if (!m.mirror_of) {
+        items.push({
+          label: "Duplicate",
+          onClick: () =>
+            duplicateMesocycle(m.id).catch((e) => toast.error(`${e}`)),
+        });
+      }
       if (mesos.length > 1) {
         if (index > 0)
           items.push({
@@ -207,7 +213,45 @@ export function ProgramPage() {
             },
           });
       }
-      items.push({ label: "", onClick: () => {}, separator: true });
+      // Mirror options
+      if (m.mirror_of) {
+        items.push({
+          label: "Remove Mirror",
+          onClick: () => {
+            setMesocycleMirror(m.id, null).catch((e) => toast.error(`${e}`));
+          },
+        });
+      } else {
+        // Build "Mirror of..." submenu with eligible non-mirror mesocycles
+        const mirrorSubmenu: ContextMenuItem[] = [];
+        for (const b of activeProgram.blocks) {
+          const eligible = b.mesocycles.filter(
+            (ms) => ms.id !== m.id && !ms.mirror_of,
+          );
+          if (eligible.length === 0) continue;
+          mirrorSubmenu.push({ label: b.name, isGroupHeader: true });
+          for (const ms of eligible) {
+            mirrorSubmenu.push({
+              label: ms.name,
+              onClick: () => {
+                if (
+                  confirm(
+                    `Make "${m.name}" a mirror of "${ms.name}"? Its current days will be deleted.`,
+                  )
+                ) {
+                  setMesocycleMirror(m.id, ms.id).catch((e) =>
+                    toast.error(`${e}`),
+                  );
+                }
+              },
+            });
+          }
+        }
+        if (mirrorSubmenu.length > 0) {
+          items.push({ label: "Mirror of...", submenu: mirrorSubmenu });
+        }
+      }
+      items.push({ label: "", separator: true });
       items.push({
         label: "Delete",
         danger: true,
@@ -225,7 +269,25 @@ export function ProgramPage() {
         label: "Rename",
         onClick: () => setActiveMicrocycle(mc.id),
       });
-      items.push({ label: "", onClick: () => {}, separator: true });
+      // Build "Move to..." submenu with all mesocycles grouped by block
+      const moveSubmenu: ContextMenuItem[] = [];
+      for (const b of activeProgram.blocks) {
+        moveSubmenu.push({ label: b.name, isGroupHeader: true });
+        for (const ms of b.mesocycles) {
+          const isCurrent = ms.id === mesocycle?.id;
+          moveSubmenu.push({
+            label: ms.name + (ms.mirror_of ? " (mirror)" : ""),
+            disabled: isCurrent || !!ms.mirror_of,
+            onClick: () => {
+              moveMicrocycle(mc.id, ms.id).catch((e) => toast.error(`${e}`));
+            },
+          });
+        }
+      }
+      if (moveSubmenu.length > 0) {
+        items.push({ label: "Move to...", submenu: moveSubmenu });
+      }
+      items.push({ label: "", separator: true });
       items.push({
         label: "Delete",
         danger: true,
@@ -252,6 +314,8 @@ export function ProgramPage() {
     deleteMesocycle,
     deleteMicrocycle,
     duplicateMesocycle,
+    moveMicrocycle,
+    setMesocycleMirror,
   ]);
 
   if (!activeProgram) {
@@ -417,7 +481,9 @@ export function ProgramPage() {
       {block && (
         <TabBar
           label="Weeks"
-          items={block.mesocycles.map((m) => m.name)}
+          items={block.mesocycles.map((m) =>
+            m.mirror_of ? `${m.name} (mirror)` : m.name,
+          )}
           activeIndex={activeMesocycleIndex}
           onSelect={setActiveMesocycle}
           onRename={
@@ -472,7 +538,7 @@ export function ProgramPage() {
       {/* Microcycle (day) tabs */}
       {mesocycle && (
         <TabBar
-          label="Days"
+          label={mesocycle.mirror_of ? "Days (read-only mirror)" : "Days"}
           items={mesocycle.microcycles.map((m) => m.name)}
           activeIndex={mesocycle.microcycles.findIndex(
             (m) => m.id === activeMicrocycleId,
@@ -481,7 +547,7 @@ export function ProgramPage() {
             setActiveMicrocycle(mesocycle.microcycles[idx]?.id ?? null)
           }
           onRename={
-            microcycle
+            !mesocycle.mirror_of && microcycle
               ? (name) => {
                   renameMicrocycle(microcycle.id, name).catch((e) =>
                     toast.error(`${e}`),
@@ -489,22 +555,34 @@ export function ProgramPage() {
                 }
               : undefined
           }
-          onReorder={(fromIdx, toIdx) => {
-            const ids = mesocycle.microcycles.map((m) => m.id);
-            const [moved] = ids.splice(fromIdx, 1);
-            ids.splice(toIdx, 0, moved);
-            reorderMicrocycles(ids)
-              .then(() => setActiveMicrocycle(ids[toIdx]))
-              .catch((e) => toast.error(`${e}`));
-          }}
-          onAdd={() => {
-            const dayNum = mesocycle.microcycles.length + 1;
-            addMicrocycle(mesocycle.id, `Day ${dayNum}`, dayNum).catch((e) =>
-              toast.error(`${e}`),
-            );
-          }}
+          onReorder={
+            !mesocycle.mirror_of
+              ? (fromIdx, toIdx) => {
+                  const ids = mesocycle.microcycles.map((m) => m.id);
+                  const [moved] = ids.splice(fromIdx, 1);
+                  ids.splice(toIdx, 0, moved);
+                  reorderMicrocycles(ids)
+                    .then(() => setActiveMicrocycle(ids[toIdx]))
+                    .catch((e) => toast.error(`${e}`));
+                }
+              : undefined
+          }
+          onAdd={
+            !mesocycle.mirror_of
+              ? () => {
+                  const dayNum = mesocycle.microcycles.length + 1;
+                  addMicrocycle(
+                    mesocycle.id,
+                    `Day ${dayNum}`,
+                    dayNum,
+                  ).catch((e) => toast.error(`${e}`));
+                }
+              : undefined
+          }
           onDelete={
-            mesocycle.microcycles.length > 0 && microcycle
+            !mesocycle.mirror_of &&
+            mesocycle.microcycles.length > 0 &&
+            microcycle
               ? () => {
                   if (confirm(`Delete "${microcycle.name}"?`)) {
                     deleteMicrocycle(microcycle.id).catch((e) =>
@@ -514,8 +592,10 @@ export function ProgramPage() {
                 }
               : undefined
           }
-          onTabContextMenu={(i, e) =>
-            openTabMenu(e, { level: "microcycle", index: i })
+          onTabContextMenu={
+            !mesocycle.mirror_of
+              ? (i, e) => openTabMenu(e, { level: "microcycle", index: i })
+              : undefined
           }
         />
       )}
@@ -587,7 +667,7 @@ function TabBar({
   items: string[];
   activeIndex: number;
   onSelect: (index: number) => void;
-  onAdd: () => void;
+  onAdd?: () => void;
   onDelete?: () => void;
   onDuplicate?: () => void;
   onRename?: (newName: string) => void;
@@ -725,11 +805,13 @@ function TabBar({
             />
           </>
         )}
-        <TabBarButton
-          label="+"
-          title={`Add ${label.toLowerCase().slice(0, -1)}`}
-          onClick={onAdd}
-        />
+        {onAdd && (
+          <TabBarButton
+            label="+"
+            title={`Add ${label.toLowerCase().slice(0, -1)}`}
+            onClick={onAdd}
+          />
+        )}
         {onDuplicate && (
           <TabBarButton
             label="&#x2398;"

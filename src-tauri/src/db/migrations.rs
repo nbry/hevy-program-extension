@@ -5,6 +5,7 @@ const MIGRATION_SQL: &str = include_str!("../../migrations/001_initial_schema.sq
 const MIGRATION_002_SQL: &str = include_str!("../../migrations/002_add_zoom_level.sql");
 const MIGRATION_003_SQL: &str = include_str!("../../migrations/003_global_tms_and_increments.sql");
 const MIGRATION_004_SQL: &str = include_str!("../../migrations/004_sync_enhancements.sql");
+const MIGRATION_005_SQL: &str = include_str!("../../migrations/005_mesocycle_mirror.sql");
 
 pub fn run_migrations(db: &Connection) -> Result<(), String> {
     // Check if migration has been applied
@@ -93,6 +94,27 @@ pub fn run_migrations(db: &Connection) -> Result<(), String> {
         .map_err(|e| format!("Failed to record migration: {}", e))?;
 
         log::info!("Applied migration: 004_sync_enhancements");
+    }
+
+    let applied_005: bool = db
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM _migrations WHERE name = '005_mesocycle_mirror'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(false);
+
+    if !applied_005 {
+        db.execute_batch(MIGRATION_005_SQL)
+            .map_err(|e| format!("Migration 005 failed: {}", e))?;
+
+        db.execute(
+            "INSERT INTO _migrations (name) VALUES ('005_mesocycle_mirror')",
+            [],
+        )
+        .map_err(|e| format!("Failed to record migration: {}", e))?;
+
+        log::info!("Applied migration: 005_mesocycle_mirror");
     }
 
     Ok(())
