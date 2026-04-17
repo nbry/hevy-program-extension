@@ -2,6 +2,7 @@ import { useParams, useNavigate } from "react-router";
 import { useProgramStore } from "../stores/programStore";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ProgramGrid } from "../components/grid/ProgramGrid";
+import { SyncModal } from "../components/sync/SyncModal";
 import { toast } from "sonner";
 import { useShallow } from "zustand/react/shallow";
 import { useContextMenu } from "../hooks/useContextMenu";
@@ -41,6 +42,8 @@ export function ProgramPage() {
     getActiveBlock,
     getActiveMesocycle,
     getActiveMicrocycle,
+    syncStatus,
+    loadSyncStatus,
   } = useProgramStore(
     useShallow((s) => ({
       activeProgram: s.activeProgram,
@@ -68,6 +71,8 @@ export function ProgramPage() {
       getActiveBlock: s.getActiveBlock,
       getActiveMesocycle: s.getActiveMesocycle,
       getActiveMicrocycle: s.getActiveMicrocycle,
+      syncStatus: s.syncStatus,
+      loadSyncStatus: s.loadSyncStatus,
     })),
   );
 
@@ -81,6 +86,7 @@ export function ProgramPage() {
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState("");
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const [showSyncModal, setShowSyncModal] = useState(false);
 
   useEffect(() => {
     if (editingName) {
@@ -327,15 +333,34 @@ export function ProgramPage() {
             </p>
           )}
         </div>
-        <button
-          className="btn btn-secondary btn-sm"
-          onClick={() =>
-            navigate(`/training-maxes?programId=${activeProgram.id}`)
-          }
-          style={{ fontSize: 12, whiteSpace: "nowrap" }}
-        >
-          Training Maxes
-        </button>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() =>
+              navigate(`/training-maxes?programId=${activeProgram.id}`)
+            }
+            style={{ fontSize: 12, whiteSpace: "nowrap" }}
+          >
+            Training Maxes
+          </button>
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={() => setShowSyncModal(true)}
+            style={{ fontSize: 12, whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 6 }}
+          >
+            Push to Hevy
+            {syncStatus && syncStatus.sync_status === "synced" && (
+              <span className="badge badge-success" style={{ fontSize: 9, padding: "1px 5px" }}>
+                Synced
+              </span>
+            )}
+            {syncStatus && syncStatus.sync_status === "error" && (
+              <span className="badge badge-error" style={{ fontSize: 9, padding: "1px 5px" }}>
+                Error
+              </span>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Block tabs */}
@@ -503,6 +528,18 @@ export function ProgramPage() {
           y={tabMenu.y}
           items={getTabMenuItems()}
           onClose={closeTabMenu}
+        />
+      )}
+
+      {showSyncModal && (
+        <SyncModal
+          programId={activeProgram.id}
+          onClose={() => setShowSyncModal(false)}
+          onSyncComplete={() => {
+            if (activeProgram) {
+              loadSyncStatus(activeProgram.id);
+            }
+          }}
         />
       )}
     </div>

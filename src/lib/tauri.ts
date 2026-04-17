@@ -272,26 +272,47 @@ export async function calculate1rmFromHistory(
 }
 
 // Sync commands
+export interface SyncPreviewRoutine {
+  microcycle_id: string;
+  name: string;
+  is_update: boolean;
+  hevy_routine_id: string | null;
+}
+
+export interface OrphanedRoutine {
+  hevy_routine_id: string;
+  name: string;
+}
+
+export interface SyncPreview {
+  folder_name: string;
+  routines: SyncPreviewRoutine[];
+  orphaned_routines: OrphanedRoutine[];
+  total_create: number;
+  total_update: number;
+}
+
+export interface SyncResultData {
+  success: boolean;
+  created: number;
+  updated: number;
+  orphans_renamed: number;
+  errors: string[];
+}
+
 export async function getSyncStatus(
   programId: string,
 ): Promise<SyncRecord | null> {
   return invoke("get_sync_status", { programId });
 }
 
-export async function previewSync(programId: string): Promise<{
-  folder_name: string;
-  routines_to_create: number;
-  routines_to_update: number;
-  routine_names: string[];
-}> {
+export async function previewSync(programId: string): Promise<SyncPreview> {
   return invoke("preview_sync", { programId });
 }
 
-export async function executeSync(programId: string): Promise<{
-  success: boolean;
-  created: number;
-  updated: number;
-  errors: string[];
-}> {
-  return invoke("execute_sync", { programId });
+export async function executeSync(
+  programId: string,
+  renameOrphans: boolean,
+): Promise<SyncResultData> {
+  return invoke("execute_sync", { programId, renameOrphans });
 }

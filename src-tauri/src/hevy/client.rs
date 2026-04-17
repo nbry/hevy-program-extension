@@ -46,6 +46,20 @@ pub struct RoutineFolderResponse {
     pub created_at: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct RoutineFoldersPage {
+    pub page: i32,
+    pub page_count: i32,
+    pub routine_folders: Vec<RoutineFolderResponse>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RoutinesPage {
+    pub page: i32,
+    pub page_count: i32,
+    pub routines: Vec<RoutineResponse>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct CreateRoutineFolderRequest {
     pub routine_folder: CreateRoutineFolderBody,
@@ -101,6 +115,19 @@ pub struct RoutineResponse {
     pub id: String,
     pub title: String,
     pub folder_id: Option<i64>,
+    pub updated_at: Option<String>,
+    pub created_at: Option<String>,
+}
+
+// Wrapper types for API responses that nest the actual data
+#[derive(Debug, Deserialize)]
+struct RoutineFolderResponseWrapper {
+    routine_folder: RoutineFolderResponse,
+}
+
+#[derive(Debug, Deserialize)]
+struct RoutineResponseWrapper {
+    routine: Vec<RoutineResponse>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -228,9 +255,11 @@ impl HevyClient {
             return Err(format!("API returned status {}: {}", status, body));
         }
 
-        resp.json()
+        let wrapper: RoutineFolderResponseWrapper = resp
+            .json()
             .await
-            .map_err(|e| format!("Failed to parse response: {}", e))
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+        Ok(wrapper.routine_folder)
     }
 
     pub async fn create_routine(
@@ -252,9 +281,16 @@ impl HevyClient {
             return Err(format!("API returned status {}: {}", status, body));
         }
 
-        resp.json()
+        let body = resp
+            .text()
             .await
-            .map_err(|e| format!("Failed to parse response: {}", e))
+            .map_err(|e| format!("Failed to read response body: {}", e))?;
+
+        serde_json::from_str::<RoutineResponseWrapper>(&body)
+            .ok()
+            .and_then(|w| w.routine.into_iter().next())
+            .or_else(|| serde_json::from_str::<RoutineResponse>(&body).ok())
+            .ok_or_else(|| format!("Failed to parse routine response | body: {}", &body[..body.len().min(500)]))
     }
 
     pub async fn update_routine(
@@ -283,8 +319,100 @@ impl HevyClient {
             return Err(format!("API returned status {}: {}", status, body));
         }
 
+        let body = resp
+            .text()
+            .await
+            .map_err(|e| format!("Failed to read response body: {}", e))?;
+
+        serde_json::from_str::<RoutineResponseWrapper>(&body)
+            .ok()
+            .and_then(|w| w.routine.into_iter().next())
+            .or_else(|| serde_json::from_str::<RoutineResponse>(&body).ok())
+            .ok_or_else(|| format!("Failed to parse routine response | body: {}", &body[..body.len().min(500)]))
+    }
+
+    pub async fn get_routine_folders(
+        &self,
+        page: i32,
+        page_size: i32,
+    ) -> Result<RoutineFoldersPage, String> {
+        let resp = self
+            .client
+            .get(format!("{}/v1/routine_folders", BASE_URL))
+            .header("api-key", &self.api_key)
+            .query(&[("page", page), ("pageSize", page_size)])
+            .send()
+            .await
+            .map_err(|e| format!("Network error: {}", e))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(format!("API returned status {}: {}", status, body));
+        }
+
         resp.json()
             .await
             .map_err(|e| format!("Failed to parse response: {}", e))
+    }
+
+    pub async fn get_routines(
+        &self,
+        page: i32,
+        page_size: i32,
+    ) -> Result<RoutinesPage, String> {
+        let resp = self
+            .client
+            .get(format!("{}/v1/routines", BASE_URL))
+            .header("api-key", &self.api_key)
+            .query(&[("page", page), ("pageSize", page_size)])
+            .send()
+            .await
+            .map_err(|e| format!("Network error: {}", e))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(format!("API returned status {}: {}", status, body));
+        }
+
+        resp.json()
+            .await
+            .map_err(|e| format!("Failed to parse response: {}", e))
+    }
+
+    pub async fn get_all_routine_folders(&self) -> Result<Vec<RoutineFolderResponse>, String> {
+        let mut all = Vec::new();
+        let mut page = 1;
+        loop {
+            let resp = self.get_routine_folders(page, 10).await?;
+            all.extend(resp.routine_folders);
+            if page >= resp.page_count {
+                break;
+            }
+            page += 1;
+        }
+        Ok(all)
+    }
+
+    pub async fn get_routines_by_folder(
+        &self,
+        folder_id: i64,
+    ) -> Result<Vec<RoutineResponse>, String> {
+        let mut all = Vec::new();
+        let mut page = 1;
+        loop {
+            let resp = self.get_routines(page, 10).await?;
+            for r in resp.routines {
+                if r.folder_id == Some(folder_id) {
+                    all.push(r);
+                }
+            }
+            if page >= resp.page_count {
+                break;
+            }
+            page += 1;
+        }
+        Ok(all)
     }
 }

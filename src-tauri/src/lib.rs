@@ -80,6 +80,10 @@ pub fn run() {
             commands::program::delete_global_training_max,
             // Exercise equipment
             commands::program::update_exercise_equipment,
+            // Sync
+            commands::sync::get_sync_status,
+            commands::sync::preview_sync,
+            commands::sync::execute_sync,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

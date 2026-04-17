@@ -5,6 +5,7 @@ import type {
   TrainingMax,
   GlobalTrainingMax,
   ResolvedTrainingMax,
+  SyncRecord,
   Block,
   Mesocycle,
   Microcycle,
@@ -22,6 +23,7 @@ interface ProgramState {
 
   trainingMaxes: Map<string, TrainingMax>;
   globalTrainingMaxes: Map<string, GlobalTrainingMax>;
+  syncStatus: SyncRecord | null;
   isDirty: boolean;
 
   loadPrograms: () => Promise<void>;
@@ -58,6 +60,7 @@ interface ProgramState {
 
   loadTrainingMaxes: () => Promise<void>;
   loadGlobalTrainingMaxes: () => Promise<void>;
+  loadSyncStatus: (programId: string) => Promise<void>;
   resolveTm: (exerciseTemplateId: string) => ResolvedTrainingMax | null;
   markDirty: () => void;
   markClean: () => void;
@@ -77,6 +80,7 @@ export const useProgramStore = create<ProgramState>((set, get) => ({
   activeMicrocycleId: null,
   trainingMaxes: new Map(),
   globalTrainingMaxes: new Map(),
+  syncStatus: null,
   isDirty: false,
 
   loadPrograms: async () => {
@@ -96,6 +100,7 @@ export const useProgramStore = create<ProgramState>((set, get) => ({
       isDirty: false,
     });
     get().loadTrainingMaxes();
+    get().loadSyncStatus(id);
   },
 
   createProgram: async (name, description) => {
@@ -241,6 +246,15 @@ export const useProgramStore = create<ProgramState>((set, get) => ({
       set({ globalTrainingMaxes: map });
     } catch {
       /* none yet */
+    }
+  },
+
+  loadSyncStatus: async (programId: string) => {
+    try {
+      const status = await api.getSyncStatus(programId);
+      set({ syncStatus: status });
+    } catch {
+      set({ syncStatus: null });
     }
   },
 
