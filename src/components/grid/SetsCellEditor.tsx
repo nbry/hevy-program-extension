@@ -1,7 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CustomCellEditorProps } from "ag-grid-react";
 import type { GridRow, GridSet } from "./gridModel";
 import { useSettingsStore } from "../../stores/settingsStore";
+import { useProgramStore } from "../../stores/programStore";
+import { useExerciseStore } from "../../stores/exerciseStore";
+import { guessEquipment } from "../../lib/equipmentGuesser";
+import { resolveSetWeight } from "../../lib/weightResolver";
+import { formatWeight } from "../../lib/conversions";
 
 const SET_TYPES = ["normal", "warmup", "failure", "dropset"] as const;
 const RPE_VALUES = [null, 6, 7, 7.5, 8, 8.5, 9, 9.5, 10] as const;
@@ -127,6 +132,10 @@ interface SetsCellEditorProps extends CustomCellEditorProps {
  */
 export function SetsCellEditor(props: SetsCellEditorProps) {
   const unitSystem = useSettingsStore((s) => s.unitSystem);
+  const minimumIncrements = useSettingsStore((s) => s.minimumIncrements);
+  const defaultIncrementKg = useSettingsStore((s) => s.defaultIncrementKg);
+  const resolveTm = useProgramStore((s) => s.resolveTm);
+  const templates = useExerciseStore((s) => s.templates);
   const setIndex = parseInt(
     (props.colDef.field ?? "set_0").replace("set_", ""),
   );
@@ -137,6 +146,53 @@ export function SetsCellEditor(props: SetsCellEditorProps) {
     gridSetToEditorState(existingSet, unitSystem),
   );
 
+  // Resolve TM info for % mode display
+  const tmInfo = useMemo(() => {
+    if (state.weightMode !== "%" || !row?.exerciseTemplateId) return null;
+    const tm = resolveTm(row.exerciseTemplateId);
+    if (!tm) return { resolved: false as const };
+
+    const template = templates.find((t) => t.id === row.exerciseTemplateId);
+    const equipment = template?.equipment ?? guessEquipment(row.exerciseTitle);
+    const pct = state.weight ? parseFloat(state.weight) / 100 : 0;
+
+    if (pct > 0) {
+      const result = resolveSetWeight(
+        pct,
+        tm,
+        equipment,
+        minimumIncrements,
+        defaultIncrementKg,
+        unitSystem,
+      );
+      const scopeLabel = tm.scope === "program" ? "Program" : "Global";
+      return {
+        resolved: true as const,
+        tmDisplay: formatWeight(tm.training_max_kg, unitSystem),
+        scope: scopeLabel,
+        weightDisplay: result.weightDisplay,
+      };
+    }
+
+    const scopeLabel = tm.scope === "program" ? "Program" : "Global";
+    return {
+      resolved: true as const,
+      tmDisplay: formatWeight(tm.training_max_kg, unitSystem),
+      scope: scopeLabel,
+      weightDisplay: null,
+    };
+  }, [
+    state.weightMode,
+    state.weight,
+    row?.exerciseTemplateId,
+    row?.exerciseTitle,
+    resolveTm,
+    templates,
+    minimumIncrements,
+    defaultIncrementKg,
+    unitSystem,
+  ]);
+
   const repsRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -144,12 +200,9 @@ export function SetsCellEditor(props: SetsCellEditorProps) {
     repsRef.current?.select();
   }, []);
 
-  const update = useCallback(
-    (patch: Partial<SetEditorState>) => {
-      setState((prev) => ({ ...prev, ...patch }));
-    },
-    [],
-  );
+  const update = useCallback((patch: Partial<SetEditorState>) => {
+    setState((prev) => ({ ...prev, ...patch }));
+  }, []);
 
   const handleConfirm = useCallback(() => {
     const gridSet = editorStateToGridSet(state);
@@ -227,7 +280,11 @@ export function SetsCellEditor(props: SetsCellEditorProps) {
         {(() => {
           const parts: string[] = [];
           if (state.reps) {
-            parts.push(state.repRangeEnd ? `${state.reps}-${state.repRangeEnd}` : state.reps);
+            parts.push(
+              state.repRangeEnd
+                ? `${state.reps}-${state.repRangeEnd}`
+                : state.reps,
+            );
           }
           if (state.weight) {
             const unit = state.weightMode === "%" ? "%" : state.weightMode;
@@ -323,7 +380,9 @@ export function SetsCellEditor(props: SetsCellEditorProps) {
 
         {/* Weight + mode */}
         <div>
-          <div style={labelStyle}>Weight</div>
+          <div style={labelStyle}>
+            {state.weightMode === "%" ? "% of Training Max" : "Weight"}
+          </div>
           <div style={{ display: "flex", gap: 4 }}>
             <input
               type="number"
@@ -331,16 +390,23 @@ export function SetsCellEditor(props: SetsCellEditorProps) {
               value={state.weight}
               onChange={(e) => update({ weight: e.target.value })}
               onKeyDown={onKeyDown}
-              placeholder="0"
+              placeholder={state.weightMode === "%" ? "85" : "0"}
               style={{ ...inputStyle, flex: 1 }}
             />
             <select
               value={state.weightMode}
-              onChange={(e) =>
+              onChange={(e) => {
+                const next = e.target.value as SetEditorState["weightMode"];
+                const prev = state.weightMode;
+                // Clear value when switching between weight and % to avoid confusion
+                const clear =
+                  (prev === "%" && next !== "%") ||
+                  (prev !== "%" && next === "%");
                 update({
-                  weightMode: e.target.value as SetEditorState["weightMode"],
-                })
-              }
+                  weightMode: next,
+                  ...(clear ? { weight: "" } : {}),
+                });
+              }}
               style={{ ...selectStyle, width: 60, flex: "none" }}
             >
               <option value="kg">kg</option>
@@ -348,6 +414,26 @@ export function SetsCellEditor(props: SetsCellEditorProps) {
               <option value="%">%TM</option>
             </select>
           </div>
+          {/* TM info line when in % mode */}
+          {state.weightMode === "%" && tmInfo && (
+            <div style={{ fontSize: 11, marginTop: 4 }}>
+              {tmInfo.resolved ? (
+                <span style={{ color: "var(--text-secondary)" }}>
+                  TM: {tmInfo.tmDisplay} ({tmInfo.scope})
+                  {tmInfo.weightDisplay && (
+                    <>
+                      {" "}
+                      = <strong>{tmInfo.weightDisplay}</strong>
+                    </>
+                  )}
+                </span>
+              ) : (
+                <span style={{ color: "#f59e0b" }}>
+                  No TM set for this exercise
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* RPE */}

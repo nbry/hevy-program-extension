@@ -1,15 +1,27 @@
 import { useNavigate, useLocation } from "react-router";
 import { useProgramStore } from "../../stores/programStore";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useContextMenu } from "../../hooks/useContextMenu";
+import { ContextMenu } from "../ui/ContextMenu";
 
 export function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { programs, programsLoaded, loadPrograms, createProgram } =
-    useProgramStore();
+  const {
+    programs,
+    programsLoaded,
+    loadPrograms,
+    createProgram,
+    deleteProgram,
+    renameProgram,
+  } = useProgramStore();
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const renameInputRef = useRef<HTMLInputElement>(null);
+  const { menu, open: openMenu, close: closeMenu } = useContextMenu();
 
   useEffect(() => {
     if (!programsLoaded) {
@@ -27,6 +39,27 @@ export function Sidebar() {
     } catch (e) {
       toast.error(`Failed to create program: ${e}`);
     }
+  };
+
+  useEffect(() => {
+    if (renamingId) {
+      renameInputRef.current?.focus();
+      renameInputRef.current?.select();
+    }
+  }, [renamingId]);
+
+  const commitRename = async () => {
+    if (!renamingId) return;
+    const trimmed = renameValue.trim();
+    const prog = programs.find((p) => p.id === renamingId);
+    if (trimmed && trimmed !== prog?.name) {
+      try {
+        await renameProgram(renamingId, trimmed);
+      } catch (e) {
+        toast.error(`Failed to rename: ${e}`);
+      }
+    }
+    setRenamingId(null);
   };
 
   return (
@@ -117,10 +150,33 @@ export function Sidebar() {
 
         {programs.map((program) => {
           const isActive = location.pathname === `/program/${program.id}`;
+          if (renamingId === program.id) {
+            return (
+              <div key={program.id} style={{ padding: "4px 8px" }}>
+                <input
+                  ref={renameInputRef}
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") commitRename();
+                    if (e.key === "Escape") setRenamingId(null);
+                  }}
+                  onBlur={commitRename}
+                  style={{ width: "100%", fontSize: 13, padding: "6px 8px" }}
+                />
+              </div>
+            );
+          }
           return (
             <button
               key={program.id}
               onClick={() => navigate(`/program/${program.id}`)}
+              onContextMenu={(e) =>
+                openMenu(e, {
+                  programId: program.id,
+                  programName: program.name,
+                })
+              }
               style={{
                 display: "block",
                 width: "100%",
@@ -169,6 +225,28 @@ export function Sidebar() {
       {/* Footer */}
       <div style={{ padding: "8px", borderTop: "1px solid var(--border)" }}>
         <button
+          onClick={() => navigate("/training-maxes")}
+          className="btn-ghost"
+          style={{
+            width: "100%",
+            justifyContent: "flex-start",
+            padding: "8px 12px",
+            fontSize: 13,
+            borderRadius: 6,
+            border: "none",
+            background:
+              location.pathname === "/training-maxes"
+                ? "var(--bg-hover)"
+                : "transparent",
+            color: "var(--text-secondary)",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          Training Maxes
+        </button>
+        <button
           onClick={() => navigate("/settings")}
           className="btn-ghost"
           style={{
@@ -191,6 +269,45 @@ export function Sidebar() {
           Settings
         </button>
       </div>
+
+      {menu.visible && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={closeMenu}
+          items={[
+            {
+              label: "Rename",
+              onClick: () => {
+                const data = menu.data as {
+                  programId: string;
+                  programName: string;
+                };
+                setRenamingId(data.programId);
+                setRenameValue(data.programName);
+              },
+            },
+            {
+              label: "Delete",
+              danger: true,
+              onClick: () => {
+                const data = menu.data as {
+                  programId: string;
+                  programName: string;
+                };
+                if (confirm(`Delete "${data.programName}"?`)) {
+                  deleteProgram(data.programId).catch((e) =>
+                    toast.error(`${e}`),
+                  );
+                  if (location.pathname === `/program/${data.programId}`) {
+                    navigate("/");
+                  }
+                }
+              },
+            },
+          ]}
+        />
+      )}
     </aside>
   );
 }

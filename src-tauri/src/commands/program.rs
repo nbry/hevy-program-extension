@@ -796,3 +796,130 @@ pub async fn set_training_max(
         )
         .map_err(|e| format!("DB error: {}", e))
 }
+
+#[tauri::command]
+pub async fn delete_training_max(
+    state: State<'_, Mutex<AppState>>,
+    program_id: String,
+    exercise_template_id: String,
+) -> Result<(), String> {
+    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    app_state
+        .db
+        .execute(
+            "DELETE FROM training_maxes WHERE program_id = ?1 AND exercise_template_id = ?2",
+            rusqlite::params![program_id, exercise_template_id],
+        )
+        .map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_global_training_maxes(
+    state: State<'_, Mutex<AppState>>,
+) -> Result<Vec<GlobalTrainingMax>, String> {
+    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+
+    let mut stmt = app_state
+        .db
+        .prepare("SELECT id, exercise_template_id, estimated_1rm_kg, training_max_kg, tm_percentage_of_1rm, source, notes, created_at, updated_at FROM global_training_maxes ORDER BY exercise_template_id")
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    let maxes = stmt
+        .query_map([], |row| {
+            Ok(GlobalTrainingMax {
+                id: row.get(0)?,
+                exercise_template_id: row.get(1)?,
+                estimated_1rm_kg: row.get(2)?,
+                training_max_kg: row.get(3)?,
+                tm_percentage_of_1rm: row.get(4)?,
+                source: row.get(5)?,
+                notes: row.get(6)?,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
+            })
+        })
+        .map_err(|e| format!("DB error: {}", e))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    Ok(maxes)
+}
+
+#[tauri::command]
+pub async fn set_global_training_max(
+    state: State<'_, Mutex<AppState>>,
+    exercise_template_id: String,
+    training_max_kg: f64,
+    estimated_1rm_kg: Option<f64>,
+    source: String,
+) -> Result<GlobalTrainingMax, String> {
+    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let id = Uuid::new_v4().to_string();
+
+    let tm_pct = estimated_1rm_kg
+        .map(|e1rm| if e1rm > 0.0 { training_max_kg / e1rm } else { 0.9 })
+        .unwrap_or(0.9);
+
+    app_state
+        .db
+        .execute(
+            "INSERT INTO global_training_maxes (id, exercise_template_id, estimated_1rm_kg, training_max_kg, tm_percentage_of_1rm, source) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT (exercise_template_id) DO UPDATE SET estimated_1rm_kg = ?3, training_max_kg = ?4, tm_percentage_of_1rm = ?5, source = ?6, updated_at = datetime('now')",
+            rusqlite::params![id, exercise_template_id, estimated_1rm_kg, training_max_kg, tm_pct, source],
+        )
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    app_state
+        .db
+        .query_row(
+            "SELECT id, exercise_template_id, estimated_1rm_kg, training_max_kg, tm_percentage_of_1rm, source, notes, created_at, updated_at FROM global_training_maxes WHERE exercise_template_id = ?1",
+            rusqlite::params![exercise_template_id],
+            |row| {
+                Ok(GlobalTrainingMax {
+                    id: row.get(0)?,
+                    exercise_template_id: row.get(1)?,
+                    estimated_1rm_kg: row.get(2)?,
+                    training_max_kg: row.get(3)?,
+                    tm_percentage_of_1rm: row.get(4)?,
+                    source: row.get(5)?,
+                    notes: row.get(6)?,
+                    created_at: row.get(7)?,
+                    updated_at: row.get(8)?,
+                })
+            },
+        )
+        .map_err(|e| format!("DB error: {}", e))
+}
+
+#[tauri::command]
+pub async fn delete_global_training_max(
+    state: State<'_, Mutex<AppState>>,
+    exercise_template_id: String,
+) -> Result<(), String> {
+    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    app_state
+        .db
+        .execute(
+            "DELETE FROM global_training_maxes WHERE exercise_template_id = ?1",
+            rusqlite::params![exercise_template_id],
+        )
+        .map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn update_exercise_equipment(
+    state: State<'_, Mutex<AppState>>,
+    exercise_template_id: String,
+    equipment: Option<String>,
+) -> Result<(), String> {
+    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    app_state
+        .db
+        .execute(
+            "UPDATE exercise_templates SET equipment = ?1 WHERE id = ?2",
+            rusqlite::params![equipment, exercise_template_id],
+        )
+        .map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}

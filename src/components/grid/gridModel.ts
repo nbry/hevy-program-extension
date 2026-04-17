@@ -57,34 +57,38 @@ export function exercisesToGridRows(exercises: ProgramExercise[]): GridRow[] {
 export function gridRowsToExerciseInputs(
   rows: GridRow[],
 ): ProgramExerciseInput[] {
-  return rows.filter((row) => row.exerciseTemplateId).map((row, i) => ({
-    exercise_template_id: row.exerciseTemplateId,
-    sort_order: i,
-    superset_group: null,
-    rest_seconds: row.restSeconds,
-    notes: row.notes,
-    sets: row.sets.map(
-      (s, si): ProgramSetInput => ({
-        sort_order: si,
-        set_type: s.setType,
-        reps: s.reps,
-        rep_range_start: s.repRangeStart,
-        rep_range_end: s.repRangeEnd,
-        weight_kg: s.weightKg,
-        percentage_of_tm: s.percentageOfTm,
-        rpe_target: s.rpeTarget,
-        duration_seconds: null,
-        distance_meters: null,
-        custom_metric: null,
-      }),
-    ),
-  }));
+  return rows
+    .filter((row) => row.exerciseTemplateId)
+    .map((row, i) => ({
+      exercise_template_id: row.exerciseTemplateId,
+      sort_order: i,
+      superset_group: null,
+      rest_seconds: row.restSeconds,
+      notes: row.notes,
+      sets: row.sets.map(
+        (s, si): ProgramSetInput => ({
+          sort_order: si,
+          set_type: s.setType,
+          reps: s.reps,
+          rep_range_start: s.repRangeStart,
+          rep_range_end: s.repRangeEnd,
+          weight_kg: s.weightKg,
+          percentage_of_tm: s.percentageOfTm,
+          rpe_target: s.rpeTarget,
+          duration_seconds: null,
+          distance_meters: null,
+          custom_metric: null,
+        }),
+      ),
+    }));
 }
 
-/** Format a set for compact display: "5x85%" or "8-12x70kg" or "10 @8" */
+/** Format a set for compact display: "5x85%" or "8-12x70kg" or "10 @8"
+ *  If resolvedWeightDisplay is provided, appends it after % sets: "5 x 85% (187lb)" */
 export function formatSet(
   s: GridSet,
   unitSystem: "metric" | "imperial",
+  resolvedWeightDisplay?: string,
 ): string {
   const parts: string[] = [];
 
@@ -101,7 +105,9 @@ export function formatSet(
   } else if (s.weightKg != null) {
     if (unitSystem === "imperial") {
       const lbs = Math.round(s.weightKg * 2.20462 * 100) / 100;
-      parts.push(`${Number.isInteger(lbs) ? lbs : parseFloat(lbs.toFixed(1))}lbs`);
+      parts.push(
+        `${Number.isInteger(lbs) ? lbs : parseFloat(lbs.toFixed(1))}lbs`,
+      );
     } else {
       const kg = Math.round(s.weightKg * 100) / 100;
       parts.push(`${Number.isInteger(kg) ? kg : parseFloat(kg.toFixed(1))}kg`);
@@ -119,7 +125,11 @@ export function formatSet(
   const repsPart = parts[0];
   const rest = parts.slice(1);
   if (s.percentageOfTm != null || s.weightKg != null) {
-    return `${repsPart} x ${rest.join(" ")}`;
+    let result = `${repsPart} x ${rest.join(" ")}`;
+    if (resolvedWeightDisplay && s.percentageOfTm != null) {
+      result += ` (${resolvedWeightDisplay})`;
+    }
+    return result;
   }
   return parts.join(" ");
 }

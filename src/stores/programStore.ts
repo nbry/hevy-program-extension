@@ -1,5 +1,14 @@
 import { create } from "zustand";
-import type { Program, ProgramFull, TrainingMax, Block, Mesocycle, Microcycle } from "../types";
+import type {
+  Program,
+  ProgramFull,
+  TrainingMax,
+  GlobalTrainingMax,
+  ResolvedTrainingMax,
+  Block,
+  Mesocycle,
+  Microcycle,
+} from "../types";
 import * as api from "../lib/tauri";
 
 interface ProgramState {
@@ -12,20 +21,30 @@ interface ProgramState {
   activeMicrocycleId: string | null;
 
   trainingMaxes: Map<string, TrainingMax>;
+  globalTrainingMaxes: Map<string, GlobalTrainingMax>;
   isDirty: boolean;
 
   loadPrograms: () => Promise<void>;
   loadProgram: (id: string) => Promise<void>;
   createProgram: (name: string, description?: string) => Promise<string>;
   deleteProgram: (id: string) => Promise<void>;
+  renameProgram: (id: string, name: string) => Promise<void>;
 
   setActiveBlock: (index: number) => void;
   setActiveMesocycle: (index: number) => void;
   setActiveMicrocycle: (id: string | null) => void;
 
   addBlock: (name: string) => Promise<void>;
-  addMesocycle: (blockId: string, name: string, weekNumber: number) => Promise<void>;
-  addMicrocycle: (mesocycleId: string, name: string, dayNumber: number) => Promise<void>;
+  addMesocycle: (
+    blockId: string,
+    name: string,
+    weekNumber: number,
+  ) => Promise<void>;
+  addMicrocycle: (
+    mesocycleId: string,
+    name: string,
+    dayNumber: number,
+  ) => Promise<void>;
   renameBlock: (blockId: string, name: string) => Promise<void>;
   renameMesocycle: (mesocycleId: string, name: string) => Promise<void>;
   renameMicrocycle: (microcycleId: string, name: string) => Promise<void>;
@@ -38,6 +57,8 @@ interface ProgramState {
   duplicateMesocycle: (mesocycleId: string) => Promise<void>;
 
   loadTrainingMaxes: () => Promise<void>;
+  loadGlobalTrainingMaxes: () => Promise<void>;
+  resolveTm: (exerciseTemplateId: string) => ResolvedTrainingMax | null;
   markDirty: () => void;
   markClean: () => void;
   refreshActiveProgram: () => Promise<void>;
@@ -55,6 +76,7 @@ export const useProgramStore = create<ProgramState>((set, get) => ({
   activeMesocycleIndex: 0,
   activeMicrocycleId: null,
   trainingMaxes: new Map(),
+  globalTrainingMaxes: new Map(),
   isDirty: false,
 
   loadPrograms: async () => {
@@ -92,12 +114,26 @@ export const useProgramStore = create<ProgramState>((set, get) => ({
     });
   },
 
+  renameProgram: async (id, name) => {
+    await api.updateProgram(id, name);
+    const { programs, activeProgram } = get();
+    set({
+      programs: programs.map((p) => (p.id === id ? { ...p, name } : p)),
+      activeProgram:
+        activeProgram?.id === id ? { ...activeProgram, name } : activeProgram,
+    });
+  },
+
   setActiveBlock: (index) => {
     const { activeProgram } = get();
     if (!activeProgram) return;
     const block = activeProgram.blocks[index];
     const firstMicrocycleId = block?.mesocycles[0]?.microcycles[0]?.id ?? null;
-    set({ activeBlockIndex: index, activeMesocycleIndex: 0, activeMicrocycleId: firstMicrocycleId });
+    set({
+      activeBlockIndex: index,
+      activeMesocycleIndex: 0,
+      activeMicrocycleId: firstMicrocycleId,
+    });
   },
 
   setActiveMesocycle: (index) => {
@@ -161,7 +197,9 @@ export const useProgramStore = create<ProgramState>((set, get) => ({
     await api.deleteBlock(blockId);
     await get().refreshActiveProgram();
     const blocks = get().activeProgram?.blocks ?? [];
-    get().setActiveBlock(Math.min(get().activeBlockIndex, Math.max(0, blocks.length - 1)));
+    get().setActiveBlock(
+      Math.min(get().activeBlockIndex, Math.max(0, blocks.length - 1)),
+    );
   },
 
   deleteMesocycle: async (mesocycleId) => {
@@ -190,7 +228,48 @@ export const useProgramStore = create<ProgramState>((set, get) => ({
       const map = new Map<string, TrainingMax>();
       for (const tm of maxes) map.set(tm.exercise_template_id, tm);
       set({ trainingMaxes: map });
-    } catch { /* none yet */ }
+    } catch {
+      /* none yet */
+    }
+  },
+
+  loadGlobalTrainingMaxes: async () => {
+    try {
+      const maxes = await api.getGlobalTrainingMaxes();
+      const map = new Map<string, GlobalTrainingMax>();
+      for (const tm of maxes) map.set(tm.exercise_template_id, tm);
+      set({ globalTrainingMaxes: map });
+    } catch {
+      /* none yet */
+    }
+  },
+
+  resolveTm: (exerciseTemplateId: string): ResolvedTrainingMax | null => {
+    const { trainingMaxes, globalTrainingMaxes } = get();
+
+    // Program-level TM takes priority
+    const programTm = trainingMaxes.get(exerciseTemplateId);
+    if (programTm) {
+      return {
+        training_max_kg: programTm.training_max_kg,
+        source: programTm.source,
+        scope: "program",
+        estimated_1rm_kg: programTm.estimated_1rm_kg,
+      };
+    }
+
+    // Fall back to global TM
+    const globalTm = globalTrainingMaxes.get(exerciseTemplateId);
+    if (globalTm) {
+      return {
+        training_max_kg: globalTm.training_max_kg,
+        source: globalTm.source,
+        scope: "global",
+        estimated_1rm_kg: globalTm.estimated_1rm_kg,
+      };
+    }
+
+    return null;
   },
 
   markDirty: () => set({ isDirty: true }),
@@ -210,7 +289,11 @@ export const useProgramStore = create<ProgramState>((set, get) => ({
 
   getActiveMesocycle: () => {
     const { activeProgram, activeBlockIndex, activeMesocycleIndex } = get();
-    return activeProgram?.blocks[activeBlockIndex]?.mesocycles[activeMesocycleIndex] ?? null;
+    return (
+      activeProgram?.blocks[activeBlockIndex]?.mesocycles[
+        activeMesocycleIndex
+      ] ?? null
+    );
   },
 
   getActiveMicrocycle: () => {

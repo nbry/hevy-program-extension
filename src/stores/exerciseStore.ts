@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { ExerciseTemplate } from "../types";
 import * as api from "../lib/tauri";
+import { useSettingsStore } from "./settingsStore";
 
 interface ExerciseState {
   templates: ExerciseTemplate[];
@@ -9,6 +10,7 @@ interface ExerciseState {
 
   loadTemplates: () => Promise<void>;
   syncFromHevy: () => Promise<{ added: number; updated: number }>;
+  syncIfStale: () => Promise<void>;
   search: (query: string) => ExerciseTemplate[];
 }
 
@@ -37,6 +39,20 @@ export const useExerciseStore = create<ExerciseState>((set, get) => ({
     } catch (e) {
       set({ syncing: false });
       throw e;
+    }
+  },
+
+  syncIfStale: async () => {
+    try {
+      const { exerciseCacheUpdatedAt } = useSettingsStore.getState();
+      const stale =
+        !exerciseCacheUpdatedAt ||
+        Date.now() - new Date(exerciseCacheUpdatedAt).getTime() > 86_400_000;
+      if (stale) {
+        await get().syncFromHevy();
+      }
+    } catch {
+      // Silent failure — user still has cached templates
     }
   },
 

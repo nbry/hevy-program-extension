@@ -4,7 +4,7 @@ export type {
   MuscleGroup,
   EquipmentCategory,
 } from "./exercise";
-export type { UserSettings, UnitSystem } from "./settings";
+export type { UserSettings, UnitSystem, MinimumIncrements } from "./settings";
 export type {
   Program,
   ProgramFull,
@@ -17,5 +17,8 @@ export type {
   ProgramSetInput,
   SetType,
   TrainingMax,
+  GlobalTrainingMax,
+  TrainingMaxSource,
+  ResolvedTrainingMax,
   SyncRecord,
 } from "./program";

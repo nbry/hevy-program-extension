@@ -8,6 +8,7 @@ import {
   type GridReadyEvent,
   type GridApi,
   type ICellRendererParams,
+  type CellContextMenuEvent,
 } from "ag-grid-community";
 import {
   type GridRow,
@@ -25,8 +26,12 @@ import type { Microcycle } from "../../types";
 import { useExerciseStore } from "../../stores/exerciseStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useProgramStore } from "../../stores/programStore";
+import { guessEquipment } from "../../lib/equipmentGuesser";
+import { resolveSetWeight } from "../../lib/weightResolver";
 import * as api from "../../lib/tauri";
 import { toast } from "sonner";
+import { useContextMenu } from "../../hooks/useContextMenu";
+import { ContextMenu, type ContextMenuItem } from "../ui/ContextMenu";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -39,10 +44,15 @@ export function ProgramGrid({ microcycle }: Props) {
   const gridApiRef = useRef<GridApi | null>(null);
   const [rows, setRows] = useState<GridRow[]>([]);
   const [setColumnCount, setSetColumnCount] = useState(5);
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [saveStatus, setSaveStatus] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
   const unitSystem = useSettingsStore((s) => s.unitSystem);
+  const minimumIncrements = useSettingsStore((s) => s.minimumIncrements);
+  const defaultIncrementKg = useSettingsStore((s) => s.defaultIncrementKg);
   const templates = useExerciseStore((s) => s.templates);
   const refreshActiveProgram = useProgramStore((s) => s.refreshActiveProgram);
+  const resolveTm = useProgramStore((s) => s.resolveTm);
 
   // Ref so save always reads current rows
   const rowsRef = useRef(rows);
@@ -70,18 +80,28 @@ export function ProgramGrid({ microcycle }: Props) {
 
     const currentRows = rowsRef.current;
     const inputs = gridRowsToExerciseInputs(currentRows);
-    console.log("[ProgramGrid] Saving", inputs.length, "exercises for microcycle", microcycle.id);
+    console.log(
+      "[ProgramGrid] Saving",
+      inputs.length,
+      "exercises for microcycle",
+      microcycle.id,
+    );
     console.log("[ProgramGrid] Payload:", JSON.stringify(inputs, null, 2));
 
     if (inputs.length === 0) {
-      console.log("[ProgramGrid] No valid exercises to save (all rows missing template ID)");
+      console.log(
+        "[ProgramGrid] No valid exercises to save (all rows missing template ID)",
+      );
     }
 
     try {
       await api.saveMicrocycleExercises(microcycle.id, inputs);
       console.log("[ProgramGrid] Save successful");
       setSaveStatus("saved");
-      setTimeout(() => setSaveStatus((s) => (s === "saved" ? "idle" : s)), 2000);
+      setTimeout(
+        () => setSaveStatus((s) => (s === "saved" ? "idle" : s)),
+        2000,
+      );
 
       // Refresh program store so navigating away and back shows saved data
       refreshActiveProgram().catch(() => {});
@@ -109,6 +129,13 @@ export function ProgramGrid({ microcycle }: Props) {
   const templatesByTitle = useMemo(() => {
     const map = new Map<string, string>();
     for (const t of templates) map.set(t.title, t.id);
+    return map;
+  }, [templates]);
+
+  // Build template ID -> template for equipment lookup
+  const templatesById = useMemo(() => {
+    const map = new Map<string, (typeof templates)[0]>();
+    for (const t of templates) map.set(t.id, t);
     return map;
   }, [templates]);
 
@@ -142,13 +169,26 @@ export function ProgramGrid({ microcycle }: Props) {
 
       if (!field) return;
 
-      console.log("[ProgramGrid] onCellValueChanged:", field, "rowId:", rowId,
-        "old:", event.oldValue, "new:", event.newValue);
+      console.log(
+        "[ProgramGrid] onCellValueChanged:",
+        field,
+        "rowId:",
+        rowId,
+        "old:",
+        event.oldValue,
+        "new:",
+        event.newValue,
+      );
 
       if (field === "exerciseTitle") {
         const newTitle = event.newValue as string;
         const templateId = templatesByTitle.get(newTitle);
-        console.log("[ProgramGrid] Exercise selected:", newTitle, "templateId:", templateId);
+        console.log(
+          "[ProgramGrid] Exercise selected:",
+          newTitle,
+          "templateId:",
+          templateId,
+        );
         updateRowById(rowId, (r) => ({
           ...r,
           exerciseTitle: newTitle,
@@ -205,7 +245,11 @@ export function ProgramGrid({ microcycle }: Props) {
         editable: true,
         cellEditor: SetsCellEditor,
         cellEditorParams: {
-          onCommit: (rowId: string, setIdx: number, gridSet: GridSet | null) => {
+          onCommit: (
+            rowId: string,
+            setIdx: number,
+            gridSet: GridSet | null,
+          ) => {
             updateRowByIdRef.current(rowId, (r) => {
               const newSets = [...r.sets];
               while (newSets.length <= setIdx) newSets.push(defaultSet());
@@ -221,12 +265,41 @@ export function ProgramGrid({ microcycle }: Props) {
         valueGetter: (params) => {
           const row = params.data as GridRow;
           if (!row || !row.sets[i]) return "";
-          return formatSet(row.sets[i], unitSystem);
+          const s = row.sets[i];
+
+          // Resolve weight for percentage-based sets
+          let resolvedDisplay: string | undefined;
+          if (s.percentageOfTm != null && row.exerciseTemplateId) {
+            const tm = resolveTm(row.exerciseTemplateId);
+            if (tm) {
+              const template = templatesById.get(row.exerciseTemplateId);
+              const equipment =
+                template?.equipment ?? guessEquipment(row.exerciseTitle);
+              const resolved = resolveSetWeight(
+                s.percentageOfTm,
+                tm,
+                equipment,
+                minimumIncrements,
+                defaultIncrementKg,
+                unitSystem,
+              );
+              resolvedDisplay = resolved.weightDisplay;
+            }
+          }
+
+          return formatSet(s, unitSystem, resolvedDisplay);
         },
         cellRenderer: (params: ICellRendererParams) => {
           const row = params.data as GridRow;
           const s = row?.sets[i];
-          if (!s || (!s.reps && !s.repRangeStart && !s.weightKg && !s.percentageOfTm && !s.rpeTarget)) {
+          if (
+            !s ||
+            (!s.reps &&
+              !s.repRangeStart &&
+              !s.weightKg &&
+              !s.percentageOfTm &&
+              !s.rpeTarget)
+          ) {
             return null;
           }
 
@@ -248,7 +321,14 @@ export function ProgramGrid({ microcycle }: Props) {
             let normalCount = 0;
             for (let j = 0; j <= i; j++) {
               const sj = row.sets[j];
-              if (sj && (sj.reps || sj.repRangeStart || sj.weightKg || sj.percentageOfTm || sj.rpeTarget)) {
+              if (
+                sj &&
+                (sj.reps ||
+                  sj.repRangeStart ||
+                  sj.weightKg ||
+                  sj.percentageOfTm ||
+                  sj.rpeTarget)
+              ) {
                 if (sj.setType === "normal") normalCount++;
               }
             }
@@ -256,24 +336,53 @@ export function ProgramGrid({ microcycle }: Props) {
             badgeColor = "var(--accent)";
           }
 
-          const textColor = s.percentageOfTm != null ? "var(--accent-hover)" : "var(--text-primary)";
+          // Determine text color and tooltip for %-based sets
+          let textColor = "var(--text-primary)";
+          let tooltip = "";
+          if (s.percentageOfTm != null) {
+            const tm = row.exerciseTemplateId
+              ? resolveTm(row.exerciseTemplateId)
+              : null;
+            if (tm) {
+              textColor = "var(--accent-hover)";
+              const scopeLabel = tm.scope === "program" ? "Program" : "Global";
+              const tmDisplay =
+                unitSystem === "imperial"
+                  ? `${Math.round(tm.training_max_kg * 2.20462)}lb`
+                  : `${Math.round(tm.training_max_kg * 10) / 10}kg`;
+              tooltip = `TM: ${tmDisplay} (${scopeLabel})`;
+            } else {
+              textColor = "#f59e0b"; // amber warning for missing TM
+              tooltip = "No Training Max set for this exercise";
+            }
+          }
 
           return (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, height: "100%" }}>
-              <span style={{
-                display: "inline-flex",
+            <div
+              style={{
+                display: "flex",
                 alignItems: "center",
-                justifyContent: "center",
-                width: 18,
-                height: 18,
-                borderRadius: 3,
-                fontSize: 10,
-                fontWeight: 700,
-                background: badgeColor,
-                color: "#fff",
-                flexShrink: 0,
-                lineHeight: 1,
-              }}>
+                gap: 6,
+                height: "100%",
+              }}
+              title={tooltip}
+            >
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: 18,
+                  height: 18,
+                  borderRadius: 3,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  background: badgeColor,
+                  color: "#fff",
+                  flexShrink: 0,
+                  lineHeight: 1,
+                }}
+              >
                 {badgeLabel}
               </span>
               <span style={{ color: textColor }}>{params.value}</span>
@@ -301,7 +410,14 @@ export function ProgramGrid({ microcycle }: Props) {
     );
 
     return cols;
-  }, [setColumnCount, unitSystem]);
+  }, [
+    setColumnCount,
+    unitSystem,
+    resolveTm,
+    templatesById,
+    minimumIncrements,
+    defaultIncrementKg,
+  ]);
 
   // Add exercise row
   const addRow = useCallback(() => {
@@ -349,19 +465,181 @@ export function ProgramGrid({ microcycle }: Props) {
     setSetColumnCount((prev) => prev + 1);
   }, []);
 
-  // Handle row reorder via drag — read AG Grid's actual display order
-  const onRowDragEnd = useCallback(
-    () => {
-      if (!gridApiRef.current) return;
-      const newOrder: GridRow[] = [];
-      gridApiRef.current.forEachNodeAfterFilterAndSort((node) => {
-        newOrder.push(node.data as GridRow);
+  // Remove set column
+  const removeSetColumn = useCallback(() => {
+    const currentRows = rowsRef.current;
+    let maxUsedIndex = -1;
+    for (const row of currentRows) {
+      for (let i = row.sets.length - 1; i >= 0; i--) {
+        const s = row.sets[i];
+        if (
+          s &&
+          (s.reps != null ||
+            s.repRangeStart != null ||
+            s.weightKg != null ||
+            s.percentageOfTm != null ||
+            s.rpeTarget != null)
+        ) {
+          maxUsedIndex = Math.max(maxUsedIndex, i);
+          break;
+        }
+      }
+    }
+    setSetColumnCount((prev) => {
+      const minAllowed = Math.max(1, maxUsedIndex + 1);
+      if (prev <= minAllowed) {
+        toast.info("Cannot remove: last column has data");
+        return prev;
+      }
+      return prev - 1;
+    });
+  }, []);
+
+  // Context menu
+  const {
+    menu: gridMenu,
+    open: openGridMenu,
+    close: closeGridMenu,
+  } = useContextMenu();
+
+  const onCellContextMenu = useCallback(
+    (event: CellContextMenuEvent) => {
+      const e = event.event as MouseEvent;
+      if (!e) return;
+      e.preventDefault();
+      openGridMenu(e, {
+        rowId: (event.data as GridRow)?.id,
+        rowIndex: (event.data as GridRow)?.rowIndex,
+        colField: event.colDef?.field,
       });
-      setRows(newOrder.map((r, i) => ({ ...r, rowIndex: i })));
-      scheduleSave();
     },
-    [scheduleSave],
+    [openGridMenu],
   );
+
+  const getGridMenuItems = useCallback((): ContextMenuItem[] => {
+    const data = gridMenu.data as
+      | { rowId?: string; rowIndex?: number; colField?: string }
+      | undefined;
+    if (!data?.rowId) return [];
+    const items: ContextMenuItem[] = [];
+
+    // Insert above
+    items.push({
+      label: "Insert Exercise Above",
+      onClick: () => {
+        setRows((prev) => {
+          const idx = prev.findIndex((r) => r.id === data.rowId);
+          if (idx === -1) return prev;
+          const newRow: GridRow = {
+            id: nextRowId(),
+            rowIndex: 0,
+            exerciseTemplateId: "",
+            exerciseTitle: "",
+            restSeconds: null,
+            notes: null,
+            sets: [],
+          };
+          const next = [...prev];
+          next.splice(idx, 0, newRow);
+          return next.map((r, i) => ({ ...r, rowIndex: i }));
+        });
+        scheduleSave();
+      },
+    });
+
+    // Insert below
+    items.push({
+      label: "Insert Exercise Below",
+      onClick: () => {
+        setRows((prev) => {
+          const idx = prev.findIndex((r) => r.id === data.rowId);
+          if (idx === -1) return prev;
+          const newRow: GridRow = {
+            id: nextRowId(),
+            rowIndex: 0,
+            exerciseTemplateId: "",
+            exerciseTitle: "",
+            restSeconds: null,
+            notes: null,
+            sets: [],
+          };
+          const next = [...prev];
+          next.splice(idx + 1, 0, newRow);
+          return next.map((r, i) => ({ ...r, rowIndex: i }));
+        });
+        scheduleSave();
+      },
+    });
+
+    // Duplicate
+    items.push({
+      label: "Duplicate Exercise",
+      onClick: () => {
+        setRows((prev) => {
+          const idx = prev.findIndex((r) => r.id === data.rowId);
+          if (idx === -1) return prev;
+          const source = prev[idx];
+          const dup: GridRow = {
+            ...source,
+            id: nextRowId(),
+            sets: source.sets.map((s) => ({ ...s })),
+          };
+          const next = [...prev];
+          next.splice(idx + 1, 0, dup);
+          return next.map((r, i) => ({ ...r, rowIndex: i }));
+        });
+        scheduleSave();
+      },
+    });
+
+    items.push({ label: "", onClick: () => {}, separator: true });
+
+    // Clear set (if on a set column)
+    if (data.colField?.startsWith("set_")) {
+      const setIdx = parseInt(data.colField.replace("set_", ""));
+      items.push({
+        label: "Clear Set",
+        onClick: () => {
+          setRows((prev) =>
+            prev.map((r) => {
+              if (r.id !== data.rowId) return r;
+              const newSets = [...r.sets];
+              if (newSets[setIdx]) newSets.splice(setIdx, 1);
+              return { ...r, sets: newSets };
+            }),
+          );
+          scheduleSave();
+        },
+      });
+    }
+
+    // Delete exercise
+    items.push({
+      label: "Delete Exercise",
+      danger: true,
+      onClick: () => {
+        setRows((prev) =>
+          prev
+            .filter((r) => r.id !== data.rowId)
+            .map((r, i) => ({ ...r, rowIndex: i })),
+        );
+        scheduleSave();
+      },
+    });
+
+    return items;
+  }, [gridMenu.data, scheduleSave]);
+
+  // Handle row reorder via drag — read AG Grid's actual display order
+  const onRowDragEnd = useCallback(() => {
+    if (!gridApiRef.current) return;
+    const newOrder: GridRow[] = [];
+    gridApiRef.current.forEachNodeAfterFilterAndSort((node) => {
+      newOrder.push(node.data as GridRow);
+    });
+    setRows(newOrder.map((r, i) => ({ ...r, rowIndex: i })));
+    scheduleSave();
+  }, [scheduleSave]);
 
   // Manual save handler
   const handleManualSave = useCallback(() => {
@@ -370,10 +648,13 @@ export function ProgramGrid({ microcycle }: Props) {
   }, [doSave]);
 
   const saveStatusText =
-    saveStatus === "saving" ? "Saving..." :
-    saveStatus === "saved" ? "Saved" :
-    saveStatus === "error" ? "Error!" :
-    "";
+    saveStatus === "saving"
+      ? "Saving..."
+      : saveStatus === "saved"
+        ? "Saved"
+        : saveStatus === "error"
+          ? "Error!"
+          : "";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -390,9 +671,9 @@ export function ProgramGrid({ microcycle }: Props) {
             marginBottom: 4,
           }}
         >
-          No exercise templates loaded. Go to <strong>Settings</strong> and click{" "}
-          <strong>"Sync Exercise Templates"</strong> to fetch exercises from Hevy.
-          Exercises cannot be saved without a valid template.
+          No exercise templates loaded. Go to <strong>Settings</strong> and
+          click <strong>"Sync Exercise Templates"</strong> to fetch exercises
+          from Hevy. Exercises cannot be saved without a valid template.
         </div>
       )}
 
@@ -417,6 +698,9 @@ export function ProgramGrid({ microcycle }: Props) {
         <button className="btn btn-secondary btn-sm" onClick={addSetColumn}>
           + Set Column
         </button>
+        <button className="btn btn-secondary btn-sm" onClick={removeSetColumn}>
+          - Set Column
+        </button>
         <button
           className="btn btn-secondary btn-sm"
           onClick={handleManualSave}
@@ -425,13 +709,18 @@ export function ProgramGrid({ microcycle }: Props) {
           Save
         </button>
         {saveStatusText && (
-          <span style={{
-            fontSize: 11,
-            color: saveStatus === "error" ? "var(--error)" :
-                   saveStatus === "saved" ? "#4ade80" :
-                   "var(--text-muted)",
-            fontWeight: 500,
-          }}>
+          <span
+            style={{
+              fontSize: 11,
+              color:
+                saveStatus === "error"
+                  ? "var(--error)"
+                  : saveStatus === "saved"
+                    ? "#4ade80"
+                    : "var(--text-muted)",
+              fontWeight: 500,
+            }}
+          >
             {saveStatusText}
           </span>
         )}
@@ -450,6 +739,7 @@ export function ProgramGrid({ microcycle }: Props) {
           columnDefs={columnDefs}
           onGridReady={onGridReady}
           onCellValueChanged={onCellValueChanged}
+          onCellContextMenu={onCellContextMenu}
           onRowDragEnd={onRowDragEnd}
           rowSelection="single"
           getRowId={(params) => params.data.id}
@@ -462,6 +752,15 @@ export function ProgramGrid({ microcycle }: Props) {
           animateRows={true}
         />
       </div>
+
+      {gridMenu.visible && (
+        <ContextMenu
+          x={gridMenu.x}
+          y={gridMenu.y}
+          items={getGridMenuItems()}
+          onClose={closeGridMenu}
+        />
+      )}
     </div>
   );
 }

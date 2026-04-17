@@ -7,4 +7,7 @@ pub struct UserSettings {
     pub hevy_username: Option<String>,
     pub exercise_cache_updated_at: Option<String>,
     pub api_key_configured: bool,
+    pub zoom_level: f64,
+    pub minimum_increments_kg: String,
+    pub default_increment_kg: f64,
 }

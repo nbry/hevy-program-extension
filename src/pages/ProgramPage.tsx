@@ -1,12 +1,18 @@
-import { useParams } from "react-router";
+import { useParams, useNavigate } from "react-router";
 import { useProgramStore } from "../stores/programStore";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ProgramGrid } from "../components/grid/ProgramGrid";
 import { toast } from "sonner";
 import { useShallow } from "zustand/react/shallow";
+import { useContextMenu } from "../hooks/useContextMenu";
+import {
+  ContextMenu,
+  type ContextMenuItem,
+} from "../components/ui/ContextMenu";
 
 export function ProgramPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
 
   // Use shallow selector to avoid re-renders from unrelated store changes (isDirty, etc.)
   const {
@@ -31,6 +37,7 @@ export function ProgramPage() {
     deleteMesocycle,
     deleteMicrocycle,
     duplicateMesocycle,
+    renameProgram,
     getActiveBlock,
     getActiveMesocycle,
     getActiveMicrocycle,
@@ -57,6 +64,7 @@ export function ProgramPage() {
       deleteMesocycle: s.deleteMesocycle,
       deleteMicrocycle: s.deleteMicrocycle,
       duplicateMesocycle: s.duplicateMesocycle,
+      renameProgram: s.renameProgram,
       getActiveBlock: s.getActiveBlock,
       getActiveMesocycle: s.getActiveMesocycle,
       getActiveMicrocycle: s.getActiveMicrocycle,
@@ -69,30 +77,265 @@ export function ProgramPage() {
     }
   }, [id, activeProgram?.id, loadProgram]);
 
-  if (!activeProgram) {
-    return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
-        <span style={{ color: "var(--text-secondary)" }}>Loading program...</span>
-      </div>
-    );
-  }
+  // Program name rename state (must be before early return)
+  const [editingName, setEditingName] = useState(false);
+  const [nameValue, setNameValue] = useState("");
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editingName) {
+      nameInputRef.current?.focus();
+      nameInputRef.current?.select();
+    }
+  }, [editingName]);
+
+  const commitRename = useCallback(() => {
+    const trimmed = nameValue.trim();
+    if (trimmed && activeProgram && trimmed !== activeProgram.name) {
+      renameProgram(activeProgram.id, trimmed).catch((e) =>
+        toast.error(`${e}`),
+      );
+    }
+    setEditingName(false);
+  }, [nameValue, activeProgram, renameProgram]);
+
+  // Tab context menus (must be before early return)
+  const {
+    menu: tabMenu,
+    open: openTabMenu,
+    close: closeTabMenu,
+  } = useContextMenu();
 
   const block = getActiveBlock();
   const mesocycle = getActiveMesocycle();
   const microcycle = getActiveMicrocycle();
 
+  const getTabMenuItems = useCallback((): ContextMenuItem[] => {
+    const data = tabMenu.data as { level: string; index: number } | undefined;
+    if (!data || !activeProgram) return [];
+    const items: ContextMenuItem[] = [];
+    const { level, index } = data;
+
+    if (level === "block") {
+      const b = activeProgram.blocks[index];
+      if (!b) return [];
+      items.push({
+        label: "Rename",
+        onClick: () => {
+          setActiveBlock(index);
+          // Trigger double-click rename programmatically isn't easy,
+          // so we'll use the existing TabBar double-click mechanism
+          // For simplicity: just select the tab (user can double-click)
+        },
+      });
+      if (activeProgram.blocks.length > 1) {
+        if (index > 0)
+          items.push({
+            label: "Move Left",
+            onClick: () => {
+              const ids = activeProgram.blocks.map((bl) => bl.id);
+              [ids[index], ids[index - 1]] = [ids[index - 1], ids[index]];
+              reorderBlocks(ids)
+                .then(() => setActiveBlock(index - 1))
+                .catch((e) => toast.error(`${e}`));
+            },
+          });
+        if (index < activeProgram.blocks.length - 1)
+          items.push({
+            label: "Move Right",
+            onClick: () => {
+              const ids = activeProgram.blocks.map((bl) => bl.id);
+              [ids[index], ids[index + 1]] = [ids[index + 1], ids[index]];
+              reorderBlocks(ids)
+                .then(() => setActiveBlock(index + 1))
+                .catch((e) => toast.error(`${e}`));
+            },
+          });
+      }
+      items.push({ label: "", onClick: () => {}, separator: true });
+      items.push({
+        label: "Delete",
+        danger: true,
+        onClick: () => {
+          if (confirm(`Delete "${b.name}"?`)) {
+            deleteBlock(b.id).catch((e) => toast.error(`${e}`));
+          }
+        },
+      });
+    } else if (level === "mesocycle") {
+      const mesos = block?.mesocycles ?? [];
+      const m = mesos[index];
+      if (!m) return [];
+      items.push({
+        label: "Rename",
+        onClick: () => setActiveMesocycle(index),
+      });
+      items.push({
+        label: "Duplicate",
+        onClick: () =>
+          duplicateMesocycle(m.id).catch((e) => toast.error(`${e}`)),
+      });
+      if (mesos.length > 1) {
+        if (index > 0)
+          items.push({
+            label: "Move Left",
+            onClick: () => {
+              const ids = mesos.map((ms) => ms.id);
+              [ids[index], ids[index - 1]] = [ids[index - 1], ids[index]];
+              reorderMesocycles(ids)
+                .then(() => setActiveMesocycle(index - 1))
+                .catch((e) => toast.error(`${e}`));
+            },
+          });
+        if (index < mesos.length - 1)
+          items.push({
+            label: "Move Right",
+            onClick: () => {
+              const ids = mesos.map((ms) => ms.id);
+              [ids[index], ids[index + 1]] = [ids[index + 1], ids[index]];
+              reorderMesocycles(ids)
+                .then(() => setActiveMesocycle(index + 1))
+                .catch((e) => toast.error(`${e}`));
+            },
+          });
+      }
+      items.push({ label: "", onClick: () => {}, separator: true });
+      items.push({
+        label: "Delete",
+        danger: true,
+        onClick: () => {
+          if (confirm(`Delete "${m.name}"?`)) {
+            deleteMesocycle(m.id).catch((e) => toast.error(`${e}`));
+          }
+        },
+      });
+    } else if (level === "microcycle") {
+      const micros = mesocycle?.microcycles ?? [];
+      const mc = micros[index];
+      if (!mc) return [];
+      items.push({
+        label: "Rename",
+        onClick: () => setActiveMicrocycle(mc.id),
+      });
+      items.push({ label: "", onClick: () => {}, separator: true });
+      items.push({
+        label: "Delete",
+        danger: true,
+        onClick: () => {
+          if (confirm(`Delete "${mc.name}"?`)) {
+            deleteMicrocycle(mc.id).catch((e) => toast.error(`${e}`));
+          }
+        },
+      });
+    }
+
+    return items;
+  }, [
+    tabMenu.data,
+    activeProgram,
+    block,
+    mesocycle,
+    setActiveBlock,
+    setActiveMesocycle,
+    setActiveMicrocycle,
+    reorderBlocks,
+    reorderMesocycles,
+    deleteBlock,
+    deleteMesocycle,
+    deleteMicrocycle,
+    duplicateMesocycle,
+  ]);
+
+  if (!activeProgram) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          height: "100%",
+        }}
+      >
+        <span style={{ color: "var(--text-secondary)" }}>
+          Loading program...
+        </span>
+      </div>
+    );
+  }
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 0 }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+        gap: 0,
+      }}
+    >
       {/* Program header */}
-      <div style={{ marginBottom: 12 }}>
-        <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 2 }}>
-          {activeProgram.name}
-        </h2>
-        {activeProgram.description && (
-          <p style={{ color: "var(--text-secondary)", fontSize: 12 }}>
-            {activeProgram.description}
-          </p>
-        )}
+      <div
+        style={{
+          marginBottom: 12,
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+        }}
+      >
+        <div>
+          {editingName ? (
+            <input
+              ref={nameInputRef}
+              value={nameValue}
+              onChange={(e) => setNameValue(e.target.value)}
+              onBlur={commitRename}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+                if (e.key === "Escape") setEditingName(false);
+              }}
+              style={{
+                fontSize: 18,
+                fontWeight: 600,
+                background: "var(--bg-tertiary)",
+                color: "var(--text-primary)",
+                border: "1px solid var(--accent)",
+                borderRadius: 4,
+                padding: "2px 8px",
+                outline: "none",
+                width: Math.max(200, nameValue.length * 10 + 40),
+              }}
+            />
+          ) : (
+            <h2
+              style={{
+                fontSize: 18,
+                fontWeight: 600,
+                marginBottom: 2,
+                cursor: "pointer",
+              }}
+              onDoubleClick={() => {
+                setEditingName(true);
+                setNameValue(activeProgram.name);
+              }}
+              title="Double-click to rename"
+            >
+              {activeProgram.name}
+            </h2>
+          )}
+          {activeProgram.description && (
+            <p style={{ color: "var(--text-secondary)", fontSize: 12 }}>
+              {activeProgram.description}
+            </p>
+          )}
+        </div>
+        <button
+          className="btn btn-secondary btn-sm"
+          onClick={() =>
+            navigate(`/training-maxes?programId=${activeProgram.id}`)
+          }
+          style={{ fontSize: 12, whiteSpace: "nowrap" }}
+        >
+          Training Maxes
+        </button>
       </div>
 
       {/* Block tabs */}
@@ -101,9 +344,13 @@ export function ProgramPage() {
         items={activeProgram.blocks.map((b) => b.name)}
         activeIndex={activeBlockIndex}
         onSelect={setActiveBlock}
-        onRename={block ? (name) => {
-          renameBlock(block.id, name).catch((e) => toast.error(`${e}`));
-        } : undefined}
+        onRename={
+          block
+            ? (name) => {
+                renameBlock(block.id, name).catch((e) => toast.error(`${e}`));
+              }
+            : undefined
+        }
         onReorder={(fromIdx, toIdx) => {
           const ids = activeProgram.blocks.map((b) => b.id);
           const [moved] = ids.splice(fromIdx, 1);
@@ -125,6 +372,9 @@ export function ProgramPage() {
               }
             : undefined
         }
+        onTabContextMenu={(i, e) =>
+          openTabMenu(e, { level: "block", index: i })
+        }
       />
 
       {/* Mesocycle (week) tabs */}
@@ -134,9 +384,15 @@ export function ProgramPage() {
           items={block.mesocycles.map((m) => m.name)}
           activeIndex={activeMesocycleIndex}
           onSelect={setActiveMesocycle}
-          onRename={mesocycle ? (name) => {
-            renameMesocycle(mesocycle.id, name).catch((e) => toast.error(`${e}`));
-          } : undefined}
+          onRename={
+            mesocycle
+              ? (name) => {
+                  renameMesocycle(mesocycle.id, name).catch((e) =>
+                    toast.error(`${e}`),
+                  );
+                }
+              : undefined
+          }
           onReorder={(fromIdx, toIdx) => {
             const ids = block.mesocycles.map((m) => m.id);
             const [moved] = ids.splice(fromIdx, 1);
@@ -155,7 +411,9 @@ export function ProgramPage() {
             block.mesocycles.length > 0 && mesocycle
               ? () => {
                   if (confirm(`Delete "${mesocycle.name}" and all its days?`)) {
-                    deleteMesocycle(mesocycle.id).catch((e) => toast.error(`${e}`));
+                    deleteMesocycle(mesocycle.id).catch((e) =>
+                      toast.error(`${e}`),
+                    );
                   }
                 }
               : undefined
@@ -163,9 +421,14 @@ export function ProgramPage() {
           onDuplicate={
             mesocycle
               ? () => {
-                  duplicateMesocycle(mesocycle.id).catch((e) => toast.error(`${e}`));
+                  duplicateMesocycle(mesocycle.id).catch((e) =>
+                    toast.error(`${e}`),
+                  );
                 }
               : undefined
+          }
+          onTabContextMenu={(i, e) =>
+            openTabMenu(e, { level: "mesocycle", index: i })
           }
         />
       )}
@@ -175,11 +438,21 @@ export function ProgramPage() {
         <TabBar
           label="Days"
           items={mesocycle.microcycles.map((m) => m.name)}
-          activeIndex={mesocycle.microcycles.findIndex((m) => m.id === activeMicrocycleId)}
-          onSelect={(idx) => setActiveMicrocycle(mesocycle.microcycles[idx]?.id ?? null)}
-          onRename={microcycle ? (name) => {
-            renameMicrocycle(microcycle.id, name).catch((e) => toast.error(`${e}`));
-          } : undefined}
+          activeIndex={mesocycle.microcycles.findIndex(
+            (m) => m.id === activeMicrocycleId,
+          )}
+          onSelect={(idx) =>
+            setActiveMicrocycle(mesocycle.microcycles[idx]?.id ?? null)
+          }
+          onRename={
+            microcycle
+              ? (name) => {
+                  renameMicrocycle(microcycle.id, name).catch((e) =>
+                    toast.error(`${e}`),
+                  );
+                }
+              : undefined
+          }
           onReorder={(fromIdx, toIdx) => {
             const ids = mesocycle.microcycles.map((m) => m.id);
             const [moved] = ids.splice(fromIdx, 1);
@@ -198,10 +471,15 @@ export function ProgramPage() {
             mesocycle.microcycles.length > 0 && microcycle
               ? () => {
                   if (confirm(`Delete "${microcycle.name}"?`)) {
-                    deleteMicrocycle(microcycle.id).catch((e) => toast.error(`${e}`));
+                    deleteMicrocycle(microcycle.id).catch((e) =>
+                      toast.error(`${e}`),
+                    );
                   }
                 }
               : undefined
+          }
+          onTabContextMenu={(i, e) =>
+            openTabMenu(e, { level: "microcycle", index: i })
           }
         />
       )}
@@ -218,6 +496,15 @@ export function ProgramPage() {
           />
         )}
       </div>
+
+      {tabMenu.visible && (
+        <ContextMenu
+          x={tabMenu.x}
+          y={tabMenu.y}
+          items={getTabMenuItems()}
+          onClose={closeTabMenu}
+        />
+      )}
     </div>
   );
 }
@@ -233,6 +520,7 @@ function TabBar({
   onDuplicate,
   onRename,
   onReorder,
+  onTabContextMenu,
 }: {
   label: string;
   items: string[];
@@ -243,6 +531,7 @@ function TabBar({
   onDuplicate?: () => void;
   onRename?: (newName: string) => void;
   onReorder?: (fromIndex: number, toIndex: number) => void;
+  onTabContextMenu?: (index: number, event: React.MouseEvent) => void;
 }) {
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -290,7 +579,7 @@ function TabBar({
       </span>
 
       <div style={{ display: "flex", gap: 2, overflow: "auto", flex: 1 }}>
-        {items.map((name, i) => (
+        {items.map((name, i) =>
           editingIndex === i ? (
             <input
               key={i}
@@ -318,6 +607,7 @@ function TabBar({
             <button
               key={i}
               onClick={() => onSelect(i)}
+              onContextMenu={(e) => onTabContextMenu?.(i, e)}
               onDoubleClick={() => {
                 if (i === activeIndex && onRename) {
                   setEditingIndex(i);
@@ -347,8 +637,8 @@ function TabBar({
             >
               {name}
             </button>
-          )
-        ))}
+          ),
+        )}
       </div>
 
       <div style={{ display: "flex", gap: 2, marginLeft: 4 }}>
@@ -367,18 +657,32 @@ function TabBar({
               label="&#x25B6;"
               title="Move right"
               onClick={() => {
-                if (activeIndex < items.length - 1) onReorder(activeIndex, activeIndex + 1);
+                if (activeIndex < items.length - 1)
+                  onReorder(activeIndex, activeIndex + 1);
               }}
               disabled={activeIndex >= items.length - 1}
             />
           </>
         )}
-        <TabBarButton label="+" title={`Add ${label.toLowerCase().slice(0, -1)}`} onClick={onAdd} />
+        <TabBarButton
+          label="+"
+          title={`Add ${label.toLowerCase().slice(0, -1)}`}
+          onClick={onAdd}
+        />
         {onDuplicate && (
-          <TabBarButton label="&#x2398;" title="Duplicate" onClick={onDuplicate} />
+          <TabBarButton
+            label="&#x2398;"
+            title="Duplicate"
+            onClick={onDuplicate}
+          />
         )}
         {onDelete && (
-          <TabBarButton label="&times;" title="Delete" onClick={onDelete} danger />
+          <TabBarButton
+            label="&times;"
+            title="Delete"
+            onClick={onDelete}
+            danger
+          />
         )}
       </div>
     </div>
@@ -437,7 +741,8 @@ function EmptyState({
   hasMesocycles: boolean;
   hasMicrocycles?: boolean;
 }) {
-  let message = 'Add a training block to get started. Click the "+" next to Blocks.';
+  let message =
+    'Add a training block to get started. Click the "+" next to Blocks.';
   if (hasBlocks && !hasMesocycles) {
     message = 'Add a week to this block. Click the "+" next to Weeks.';
   } else if (hasMesocycles) {

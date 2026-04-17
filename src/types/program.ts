@@ -105,10 +105,31 @@ export interface TrainingMax {
   estimated_1rm_kg: number | null;
   training_max_kg: number;
   tm_percentage_of_1rm: number;
-  source: "manual" | "hevy_import" | "calculated";
+  source: TrainingMaxSource;
   notes: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface GlobalTrainingMax {
+  id: string;
+  exercise_template_id: string;
+  estimated_1rm_kg: number | null;
+  training_max_kg: number;
+  tm_percentage_of_1rm: number;
+  source: TrainingMaxSource;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type TrainingMaxSource = "manual" | "hevy_import" | "calculated";
+
+export interface ResolvedTrainingMax {
+  training_max_kg: number;
+  source: TrainingMaxSource;
+  scope: "program" | "global";
+  estimated_1rm_kg: number | null;
 }
 
 export interface SyncRecord {

@@ -73,6 +73,13 @@ pub fn run() {
             commands::program::save_microcycle_exercises,
             commands::program::get_training_maxes,
             commands::program::set_training_max,
+            commands::program::delete_training_max,
+            // Global Training Maxes
+            commands::program::get_global_training_maxes,
+            commands::program::set_global_training_max,
+            commands::program::delete_global_training_max,
+            // Exercise equipment
+            commands::program::update_exercise_equipment,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

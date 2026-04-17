@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { toast } from "sonner";
 import * as api from "../lib/tauri";
 import { useSettingsStore } from "../stores/settingsStore";
 import { useExerciseStore } from "../stores/exerciseStore";
+import type { EquipmentCategory, MinimumIncrements } from "../types";
+import { KG_TO_LBS, LBS_TO_KG } from "../lib/conversions";
 
 export function SettingsPage() {
   const {
@@ -10,10 +12,16 @@ export function SettingsPage() {
     hevyUsername,
     apiKeyConfigured,
     exerciseCacheUpdatedAt,
+    zoomLevel,
     setUnitSystem,
+    setZoomLevel,
     setApiKeyConfigured,
     setHevyUser,
     setExerciseCacheUpdatedAt,
+    minimumIncrements,
+    defaultIncrementKg,
+    setMinimumIncrements,
+    setDefaultIncrementKg,
   } = useSettingsStore();
 
   const { templates, syncing, syncFromHevy } = useExerciseStore();
@@ -200,6 +208,68 @@ export function SettingsPage() {
         </div>
       </section>
 
+      {/* Display / Zoom Section */}
+      <section style={{ marginBottom: 32 }}>
+        <h3
+          style={{
+            fontSize: 14,
+            fontWeight: 600,
+            marginBottom: 12,
+            color: "var(--text-secondary)",
+          }}
+        >
+          Display
+        </h3>
+        <div
+          style={{
+            background: "var(--bg-secondary)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            padding: 16,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => setZoomLevel(zoomLevel - 0.1)}
+              disabled={zoomLevel <= 0.5}
+            >
+              -
+            </button>
+            <span style={{ fontSize: 13, minWidth: 50, textAlign: "center" }}>
+              {Math.round(zoomLevel * 100)}%
+            </span>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => setZoomLevel(zoomLevel + 0.1)}
+              disabled={zoomLevel >= 2.0}
+            >
+              +
+            </button>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => setZoomLevel(1.0)}
+            >
+              Reset
+            </button>
+          </div>
+          <div
+            style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8 }}
+          >
+            Ctrl + / Ctrl - to zoom, Ctrl 0 to reset
+          </div>
+        </div>
+      </section>
+
+      {/* Weight Increments Section */}
+      <WeightIncrementsSection
+        unitSystem={unitSystem}
+        increments={minimumIncrements}
+        defaultIncrement={defaultIncrementKg}
+        onUpdateIncrements={setMinimumIncrements}
+        onUpdateDefault={setDefaultIncrementKg}
+      />
+
       {/* Exercise Cache Section */}
       <section style={{ marginBottom: 32 }}>
         <h3
@@ -250,5 +320,202 @@ export function SettingsPage() {
         </div>
       </section>
     </div>
+  );
+}
+
+const EQUIPMENT_LABELS: Record<string, string> = {
+  barbell: "Barbell",
+  dumbbell: "Dumbbell",
+  machine: "Machine / Cable",
+  kettlebell: "Kettlebell",
+  plate: "Plate Loaded",
+  other: "Other",
+};
+
+const DEFAULT_INCREMENTS_KG: MinimumIncrements = {
+  barbell: 2.5,
+  dumbbell: 2.0,
+  machine: 5.0,
+  kettlebell: 4.0,
+  plate: 2.5,
+  other: 2.5,
+  none: 0,
+  resistance_band: 0,
+  suspension: 0,
+};
+
+const DEFAULT_INCREMENTS_LBS: MinimumIncrements = {
+  barbell: 2.27, // ~5 lbs
+  dumbbell: 2.27, // ~5 lbs
+  machine: 2.27, // ~5 lbs
+  kettlebell: 3.63, // ~8 lbs
+  plate: 2.27, // ~5 lbs
+  other: 2.27, // ~5 lbs
+  none: 0,
+  resistance_band: 0,
+  suspension: 0,
+};
+
+function WeightIncrementsSection({
+  unitSystem,
+  increments,
+  defaultIncrement,
+  onUpdateIncrements,
+  onUpdateDefault,
+}: {
+  unitSystem: string;
+  increments: MinimumIncrements;
+  defaultIncrement: number;
+  onUpdateIncrements: (inc: MinimumIncrements) => Promise<void>;
+  onUpdateDefault: (kg: number) => Promise<void>;
+}) {
+  const isImperial = unitSystem === "imperial";
+
+  const displayValue = (kg: number): string => {
+    if (isImperial) {
+      const lbs = Math.round(kg * KG_TO_LBS * 100) / 100;
+      // Show clean number: strip trailing zeros
+      return String(parseFloat(lbs.toFixed(2)));
+    }
+    return String(kg);
+  };
+
+  const parseToKg = (val: string): number | null => {
+    const num = parseFloat(val);
+    if (isNaN(num) || num < 0) return null;
+    if (isImperial) return Math.round(num * LBS_TO_KG * 10000) / 10000;
+    return num;
+  };
+
+  const handleChange = useCallback(
+    (equipment: EquipmentCategory, value: string) => {
+      const kg = parseToKg(value);
+      if (kg == null) return;
+      const updated = { ...increments, [equipment]: kg };
+      onUpdateIncrements(updated);
+    },
+    [increments, onUpdateIncrements, isImperial],
+  );
+
+  const handleDefaultChange = useCallback(
+    (value: string) => {
+      const kg = parseToKg(value);
+      if (kg == null) return;
+      onUpdateDefault(kg);
+    },
+    [onUpdateDefault, isImperial],
+  );
+
+  const handleReset = useCallback(() => {
+    const defaults = isImperial ? DEFAULT_INCREMENTS_LBS : DEFAULT_INCREMENTS_KG;
+    onUpdateIncrements({ ...defaults });
+    onUpdateDefault(isImperial ? 2.27 : 2.5); // 5 lbs or 2.5 kg
+  }, [onUpdateIncrements, onUpdateDefault, isImperial]);
+
+  const unit = isImperial ? "lbs" : "kg";
+
+  const inputStyle: React.CSSProperties = {
+    width: 70,
+    padding: "3px 6px",
+    fontSize: 13,
+    background: "var(--bg-tertiary)",
+    color: "var(--text-primary)",
+    border: "1px solid var(--border)",
+    borderRadius: 4,
+    textAlign: "right",
+  };
+
+  return (
+    <section style={{ marginBottom: 32 }}>
+      <h3
+        style={{
+          fontSize: 14,
+          fontWeight: 600,
+          marginBottom: 12,
+          color: "var(--text-secondary)",
+        }}
+      >
+        Weight Increments
+      </h3>
+      <div
+        style={{
+          background: "var(--bg-secondary)",
+          border: "1px solid var(--border)",
+          borderRadius: 8,
+          padding: 16,
+        }}
+      >
+        <p
+          style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 12 }}
+        >
+          Minimum weight increment per equipment type. Used for rounding when
+          calculating weights from %TM.
+        </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {Object.entries(EQUIPMENT_LABELS).map(([key, label]) => (
+            <div
+              key={key}
+              style={{ display: "flex", alignItems: "center", gap: 8 }}
+            >
+              <span
+                style={{
+                  fontSize: 13,
+                  minWidth: 130,
+                  color: "var(--text-primary)",
+                }}
+              >
+                {label}
+              </span>
+              <input
+                type="number"
+                step="any"
+                min="0"
+                value={displayValue(increments[key as EquipmentCategory] ?? 0)}
+                onChange={(e) =>
+                  handleChange(key as EquipmentCategory, e.target.value)
+                }
+                style={inputStyle}
+              />
+              <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                {unit}
+              </span>
+            </div>
+          ))}
+          <div
+            style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }}
+          />
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span
+              style={{
+                fontSize: 13,
+                minWidth: 130,
+                color: "var(--text-primary)",
+                fontWeight: 500,
+              }}
+            >
+              Default (unknown)
+            </span>
+            <input
+              type="number"
+              step="any"
+              min="0"
+              value={displayValue(defaultIncrement)}
+              onChange={(e) => handleDefaultChange(e.target.value)}
+              style={inputStyle}
+            />
+            <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+              {unit}
+            </span>
+          </div>
+        </div>
+        <button
+          className="btn btn-ghost btn-sm"
+          onClick={handleReset}
+          style={{ marginTop: 12, fontSize: 11 }}
+        >
+          Reset to defaults
+        </button>
+      </div>
+    </section>
   );
 }

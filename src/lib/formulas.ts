@@ -28,5 +28,18 @@ export function weightFromPercentage(
 
 /** Round weight to nearest plate-friendly increment (2.5 kg / 5 lbs) */
 export function roundToPlate(kg: number, increment: number = 2.5): number {
+  if (increment <= 0) return kg;
   return Math.round(kg / increment) * increment;
+}
+
+/** Resolve the display weight for a percentage-based set.
+ *  Returns the plate-rounded weight in kg. */
+export function resolvePercentageWeight(
+  percentageOfTm: number,
+  trainingMaxKg: number,
+  incrementKg: number,
+): number {
+  const rawKg = weightFromPercentage(trainingMaxKg, percentageOfTm);
+  if (incrementKg <= 0) return rawKg;
+  return roundToPlate(rawKg, incrementKg);
 }

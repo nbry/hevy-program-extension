@@ -99,6 +99,19 @@ pub struct TrainingMax {
     pub updated_at: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct GlobalTrainingMax {
+    pub id: String,
+    pub exercise_template_id: String,
+    pub estimated_1rm_kg: Option<f64>,
+    pub training_max_kg: f64,
+    pub tm_percentage_of_1rm: f64,
+    pub source: String,
+    pub notes: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProgramExerciseInput {
     pub exercise_template_id: String,

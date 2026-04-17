@@ -19,6 +19,37 @@ fn get_api_key_from_keyring() -> Result<String, String> {
         .map_err(|_| "No API key configured. Please add your key in Settings.".to_string())
 }
 
+/// Guess equipment category from exercise title patterns like "(Barbell)", "(Dumbbell)", etc.
+fn guess_equipment(title: &str) -> Option<&'static str> {
+    let lower = title.to_lowercase();
+    if lower.contains("(barbell)") {
+        Some("barbell")
+    } else if lower.contains("(dumbbell)") {
+        Some("dumbbell")
+    } else if lower.contains("(cable)")
+        || lower.contains("(machine)")
+        || lower.contains("(smith machine)")
+        || lower.contains("(lever)")
+    {
+        Some("machine")
+    } else if lower.contains("(kettlebell)") {
+        Some("kettlebell")
+    } else if lower.contains("(band)") || lower.contains("(resistance band)") {
+        Some("resistance_band")
+    } else if lower.contains("(bodyweight)")
+        || lower.contains("(assisted)")
+        || lower.contains("(self-assisted)")
+    {
+        Some("none")
+    } else if lower.contains("(plate)") || lower.contains("(weighted)") {
+        Some("plate")
+    } else if lower.contains("(suspension)") || lower.contains("(trx)") {
+        Some("suspension")
+    } else {
+        None
+    }
+}
+
 #[tauri::command]
 pub async fn sync_exercise_templates(
     state: State<'_, Mutex<AppState>>,
@@ -46,6 +77,8 @@ pub async fn sync_exercise_templates(
         let secondary = serde_json::to_string(&template.secondary_muscle_groups)
             .unwrap_or_else(|_| "[]".to_string());
 
+        let guessed_equipment = guess_equipment(&template.title);
+
         let exists: bool = app_state
             .db
             .query_row(
@@ -67,16 +100,26 @@ pub async fn sync_exercise_templates(
                     template.id,
                 ],
             ).map_err(|e| format!("DB error: {}", e))?;
+
+            // Auto-populate equipment from title if currently NULL
+            if let Some(equipment) = guessed_equipment {
+                app_state.db.execute(
+                    "UPDATE exercise_templates SET equipment = ?1 WHERE id = ?2 AND equipment IS NULL",
+                    rusqlite::params![equipment, template.id],
+                ).map_err(|e| format!("DB error: {}", e))?;
+            }
+
             updated += 1;
         } else {
             app_state.db.execute(
-                "INSERT INTO exercise_templates (id, title, exercise_type, primary_muscle_group, secondary_muscle_groups, is_custom, cached_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))",
+                "INSERT INTO exercise_templates (id, title, exercise_type, primary_muscle_group, secondary_muscle_groups, equipment, is_custom, cached_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'))",
                 rusqlite::params![
                     template.id,
                     template.title,
                     template.exercise_type,
                     template.primary_muscle_group,
                     secondary,
+                    guessed_equipment,
                     template.is_custom as i32,
                 ],
             ).map_err(|e| format!("DB error: {}", e))?;
@@ -113,9 +156,9 @@ pub async fn get_exercise_templates(
 
     let templates = stmt
         .query_map([], |row| {
-            let secondary_json: String = row.get::<_, String>(4).unwrap_or_else(|_| "[]".to_string());
-            let secondary: Vec<String> =
-                serde_json::from_str(&secondary_json).unwrap_or_default();
+            let secondary_json: String =
+                row.get::<_, String>(4).unwrap_or_else(|_| "[]".to_string());
+            let secondary: Vec<String> = serde_json::from_str(&secondary_json).unwrap_or_default();
 
             Ok(ExerciseTemplate {
                 id: row.get(0)?,
@@ -150,9 +193,9 @@ pub async fn search_exercises(
 
     let templates = stmt
         .query_map(rusqlite::params![pattern, limit], |row| {
-            let secondary_json: String = row.get::<_, String>(4).unwrap_or_else(|_| "[]".to_string());
-            let secondary: Vec<String> =
-                serde_json::from_str(&secondary_json).unwrap_or_default();
+            let secondary_json: String =
+                row.get::<_, String>(4).unwrap_or_else(|_| "[]".to_string());
+            let secondary: Vec<String> = serde_json::from_str(&secondary_json).unwrap_or_default();
 
             Ok(ExerciseTemplate {
                 id: row.get(0)?,
@@ -172,9 +215,7 @@ pub async fn search_exercises(
 }
 
 #[tauri::command]
-pub async fn calculate_1rm_from_history(
-    exercise_template_id: String,
-) -> Result<f64, String> {
+pub async fn calculate_1rm_from_history(exercise_template_id: String) -> Result<f64, String> {
     let api_key = get_api_key_from_keyring()?;
     let client = HevyClient::new(api_key);
 

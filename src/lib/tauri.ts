@@ -5,7 +5,9 @@ import type {
   Program,
   ProgramFull,
   TrainingMax,
+  GlobalTrainingMax,
   SyncRecord,
+  MinimumIncrements,
 } from "../types";
 
 // API Key commands
@@ -29,13 +31,41 @@ export async function validateApiKey(
 
 // Settings commands
 export async function getSettings(): Promise<UserSettings> {
-  return invoke("get_settings");
+  const raw = await invoke<Record<string, unknown>>("get_settings");
+  // Parse minimum_increments_kg from JSON string to object
+  let minimumIncrements: MinimumIncrements;
+  try {
+    minimumIncrements =
+      typeof raw.minimum_increments_kg === "string"
+        ? JSON.parse(raw.minimum_increments_kg)
+        : raw.minimum_increments_kg;
+  } catch {
+    minimumIncrements = {
+      barbell: 2.5,
+      dumbbell: 2.0,
+      machine: 5.0,
+      kettlebell: 4.0,
+      plate: 2.5,
+      other: 2.5,
+      none: 0,
+      resistance_band: 0,
+      suspension: 0,
+    };
+  }
+  return { ...raw, minimum_increments_kg: minimumIncrements } as UserSettings;
 }
 
 export async function updateSettings(
   settings: Partial<UserSettings>,
 ): Promise<void> {
-  return invoke("update_settings", { settings });
+  // Serialize minimum_increments_kg to JSON string for backend
+  const payload: Record<string, unknown> = { ...settings };
+  if (settings.minimum_increments_kg) {
+    payload.minimum_increments_kg = JSON.stringify(
+      settings.minimum_increments_kg,
+    );
+  }
+  return invoke("update_settings", { settings: payload });
 }
 
 // Exercise template commands
@@ -133,10 +163,7 @@ export async function renameBlock(id: string, name: string): Promise<void> {
   return invoke("rename_block", { id, name });
 }
 
-export async function renameMesocycle(
-  id: string,
-  name: string,
-): Promise<void> {
+export async function renameMesocycle(id: string, name: string): Promise<void> {
   return invoke("rename_mesocycle", { id, name });
 }
 
@@ -151,9 +178,7 @@ export async function reorderBlocks(blockIds: string[]): Promise<void> {
   return invoke("reorder_blocks", { blockIds });
 }
 
-export async function reorderMesocycles(
-  mesocycleIds: string[],
-): Promise<void> {
+export async function reorderMesocycles(mesocycleIds: string[]): Promise<void> {
   return invoke("reorder_mesocycles", { mesocycleIds });
 }
 
@@ -198,6 +223,46 @@ export async function setTrainingMax(
     estimated1rmKg: estimated1rmKg ?? null,
     source,
   });
+}
+
+export async function deleteTrainingMax(
+  programId: string,
+  exerciseTemplateId: string,
+): Promise<void> {
+  return invoke("delete_training_max", { programId, exerciseTemplateId });
+}
+
+// Global training max commands
+export async function getGlobalTrainingMaxes(): Promise<GlobalTrainingMax[]> {
+  return invoke("get_global_training_maxes");
+}
+
+export async function setGlobalTrainingMax(
+  exerciseTemplateId: string,
+  trainingMaxKg: number,
+  estimated1rmKg?: number,
+  source: string = "manual",
+): Promise<GlobalTrainingMax> {
+  return invoke("set_global_training_max", {
+    exerciseTemplateId,
+    trainingMaxKg,
+    estimated1rmKg: estimated1rmKg ?? null,
+    source,
+  });
+}
+
+export async function deleteGlobalTrainingMax(
+  exerciseTemplateId: string,
+): Promise<void> {
+  return invoke("delete_global_training_max", { exerciseTemplateId });
+}
+
+// Exercise equipment
+export async function updateExerciseEquipment(
+  exerciseTemplateId: string,
+  equipment: string | null,
+): Promise<void> {
+  return invoke("update_exercise_equipment", { exerciseTemplateId, equipment });
 }
 
 export async function calculate1rmFromHistory(
