@@ -1,12 +1,11 @@
 # Hevy Program Extension
 
-🚧 Under Construction 🚧
-
-A desktop application for designing long-term workout programs and syncing them to [Hevy](https://hevy.com). Built for strength athletes, powerlifters, and coaches who need to plan structured training blocks with percentage-based programming.
-
 ## What It Does
 
-Hevy is great for logging workouts, but it lacks tools for designing multi-week periodized programs. This app fills that gap with a spreadsheet-like interface for building training programs, then pushes them to Hevy as routine folders so you can execute them from the Hevy app.
+Hevy is an excellent app for logging workouts, but the interface is as bit limited for designing multi-week periodized programs. This app fills that gap with a spreadsheet-like interface for building training programs, then pushes them to Hevy as routine folders so you can execute them from the Hevy app.
+
+<img width="1649" height="888" alt="image" src="https://github.com/user-attachments/assets/ad567bc1-81ae-4ff1-b2db-82601cf1843d" />
+
 
 ### Key Features
 
@@ -16,6 +15,18 @@ Hevy is great for logging workouts, but it lacks tools for designing multi-week 
 - **Hevy Sync** — Push your program to Hevy as a routine folder with individual routines for each training day. Update existing synced programs without creating duplicates
 - **Unit Toggle** — Switch between kg and lbs display. All weights are stored in kg internally to match the Hevy API
 - **Offline-First** — All program data is stored locally in SQLite. Internet is only needed for syncing to Hevy and importing exercise data
+
+## ⚠️ Current State
+
+This project can be cloned, built, and run in its current state. However, it is still under active development.
+
+Major bugs are currently being addressed, and significant changes to the codebase are expected in the near future. Expect instability and breaking changes.
+
+```
+# Run in development
+npm ci
+npm run tauri dev
+```
 
 ## Workflow
 
