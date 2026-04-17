@@ -37,7 +37,7 @@ pub struct HevyExerciseTemplate {
     pub is_custom: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct RoutineFolderResponse {
     pub id: i64,
     pub index: i64,
@@ -117,6 +117,52 @@ pub struct RoutineResponse {
     pub folder_id: Option<i64>,
     pub updated_at: Option<String>,
     pub created_at: Option<String>,
+}
+
+// --- Full routine detail response types (for GET /v1/routines/{id}) ---
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct RoutineDetailResponse {
+    pub id: String,
+    pub title: String,
+    pub folder_id: Option<i64>,
+    pub notes: Option<String>,
+    pub updated_at: Option<String>,
+    pub created_at: Option<String>,
+    pub exercises: Vec<RoutineExerciseResponse>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct RoutineExerciseResponse {
+    pub exercise_template_id: String,
+    pub supersets_id: Option<i32>, // Note: response uses "supersets_id" (with s)
+    pub rest_seconds: Option<i32>,
+    pub notes: Option<String>,
+    pub sets: Vec<RoutineSetResponse>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct RoutineSetResponse {
+    #[serde(rename = "type")]
+    pub set_type: String,
+    pub weight_kg: Option<f64>,
+    pub reps: Option<i32>,
+    pub rep_range: Option<RepRangeResponse>,
+    pub distance_meters: Option<i32>,
+    pub duration_seconds: Option<i32>,
+    pub rpe: Option<f64>,
+    pub custom_metric: Option<f64>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct RepRangeResponse {
+    pub start: Option<i32>,
+    pub end: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RoutineDetailWrapper {
+    routine: RoutineDetailResponse,
 }
 
 // Wrapper types for API responses that nest the actual data
@@ -414,5 +460,51 @@ impl HevyClient {
             page += 1;
         }
         Ok(all)
+    }
+
+    pub async fn get_routine(&self, routine_id: &str) -> Result<RoutineDetailResponse, String> {
+        let resp = self
+            .client
+            .get(format!("{}/v1/routines/{}", BASE_URL, routine_id))
+            .header("api-key", &self.api_key)
+            .send()
+            .await
+            .map_err(|e| format!("Network error: {}", e))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(format!("API returned status {}: {}", status, body));
+        }
+
+        let body = resp
+            .text()
+            .await
+            .map_err(|e| format!("Failed to read response body: {}", e))?;
+
+        // Try wrapped format first, then direct
+        serde_json::from_str::<RoutineDetailWrapper>(&body)
+            .map(|w| w.routine)
+            .or_else(|_| serde_json::from_str::<RoutineDetailResponse>(&body))
+            .map_err(|e| {
+                format!(
+                    "Failed to parse routine detail: {} | body: {}",
+                    e,
+                    &body[..body.len().min(500)]
+                )
+            })
+    }
+
+    pub async fn get_routines_detail_by_folder(
+        &self,
+        folder_id: i64,
+    ) -> Result<Vec<RoutineDetailResponse>, String> {
+        let summaries = self.get_routines_by_folder(folder_id).await?;
+        let mut details = Vec::new();
+        for summary in &summaries {
+            let detail = self.get_routine(&summary.id).await?;
+            details.push(detail);
+        }
+        Ok(details)
     }
 }

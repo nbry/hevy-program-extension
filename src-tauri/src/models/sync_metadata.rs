@@ -8,4 +8,7 @@ pub struct SyncRecord {
     pub hevy_folder_title: Option<String>,
     pub last_synced_at: Option<String>,
     pub sync_status: String,
+    pub sync_mode: String,
+    pub sync_direction: String,
+    pub block_id: Option<String>,
 }

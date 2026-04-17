@@ -84,6 +84,13 @@ pub fn run() {
             commands::sync::get_sync_status,
             commands::sync::preview_sync,
             commands::sync::execute_sync,
+            // Import
+            commands::sync::list_hevy_folders,
+            commands::sync::preview_import,
+            commands::sync::execute_import,
+            // Pull
+            commands::sync::preview_pull,
+            commands::sync::execute_pull,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

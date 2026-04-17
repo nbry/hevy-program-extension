@@ -3,6 +3,7 @@ import { useProgramStore } from "../stores/programStore";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ProgramGrid } from "../components/grid/ProgramGrid";
 import { SyncModal } from "../components/sync/SyncModal";
+import { PullModal } from "../components/sync/PullModal";
 import { toast } from "sonner";
 import { useShallow } from "zustand/react/shallow";
 import { useContextMenu } from "../hooks/useContextMenu";
@@ -87,6 +88,7 @@ export function ProgramPage() {
   const [nameValue, setNameValue] = useState("");
   const nameInputRef = useRef<HTMLInputElement>(null);
   const [showSyncModal, setShowSyncModal] = useState(false);
+  const [showPullModal, setShowPullModal] = useState(false);
 
   useEffect(() => {
     if (editingName) {
@@ -360,6 +362,15 @@ export function ProgramPage() {
               </span>
             )}
           </button>
+          {syncStatus && (
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => setShowPullModal(true)}
+              style={{ fontSize: 12, whiteSpace: "nowrap" }}
+            >
+              Pull from Hevy
+            </button>
+          )}
         </div>
       </div>
 
@@ -537,6 +548,19 @@ export function ProgramPage() {
           onClose={() => setShowSyncModal(false)}
           onSyncComplete={() => {
             if (activeProgram) {
+              loadSyncStatus(activeProgram.id);
+            }
+          }}
+        />
+      )}
+
+      {showPullModal && (
+        <PullModal
+          programId={activeProgram.id}
+          onClose={() => setShowPullModal(false)}
+          onPullComplete={() => {
+            if (activeProgram) {
+              loadProgram(activeProgram.id);
               loadSyncStatus(activeProgram.id);
             }
           }}

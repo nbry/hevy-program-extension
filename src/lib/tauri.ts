@@ -316,3 +316,107 @@ export async function executeSync(
 ): Promise<SyncResultData> {
   return invoke("execute_sync", { programId, renameOrphans });
 }
+
+// Import from Hevy commands
+export interface HevyFolderInfo {
+  id: number;
+  title: string;
+  routine_count: number;
+  already_linked: boolean;
+  linked_program_name: string | null;
+}
+
+export interface ImportPreviewRoutine {
+  hevy_routine_id: string;
+  title: string;
+  exercise_count: number;
+  set_count: number;
+  parsed_week: number | null;
+  parsed_day: number | null;
+  parsed_name: string | null;
+}
+
+export interface ImportWeek {
+  week_number: number;
+  days: ImportDay[];
+}
+
+export interface ImportDay {
+  day_number: number;
+  routine_title: string;
+  hevy_routine_id: string;
+  exercise_count: number;
+  set_count: number;
+}
+
+export interface ImportPreview {
+  folder_name: string;
+  folder_id: number;
+  routines: ImportPreviewRoutine[];
+  weeks: ImportWeek[];
+}
+
+export interface ImportResult {
+  success: boolean;
+  program_id: string;
+  program_name: string;
+  microcycles_created: number;
+  exercises_imported: number;
+  errors: string[];
+}
+
+export async function listHevyFolders(): Promise<HevyFolderInfo[]> {
+  return invoke("list_hevy_folders");
+}
+
+export async function previewImport(folderId: number): Promise<ImportPreview> {
+  return invoke("preview_import", { folderId });
+}
+
+export async function executeImport(
+  folderId: number,
+  programName: string,
+  targetProgramId: string | null,
+  targetMode: "new_program" | "new_block",
+): Promise<ImportResult> {
+  return invoke("execute_import", {
+    folderId,
+    programName,
+    targetProgramId,
+    targetMode,
+  });
+}
+
+// Pull from Hevy commands
+export interface PullChange {
+  microcycle_id: string;
+  microcycle_name: string;
+  hevy_routine_id: string;
+  local_exercise_count: number;
+  remote_exercise_count: number;
+  local_set_count: number;
+  remote_set_count: number;
+  has_changes: boolean;
+}
+
+export interface PullPreview {
+  changes: PullChange[];
+  unchanged: string[];
+}
+
+export interface PullResult {
+  success: boolean;
+  updated_microcycles: number;
+  errors: string[];
+}
+
+export async function previewPull(programId: string): Promise<PullPreview> {
+  return invoke("preview_pull", { programId });
+}
+
+export async function executePull(
+  programId: string,
+  microcycleIds: string[],
+): Promise<PullResult> {
+  return invoke("execute_pull", { programId, microcycleIds });
+}

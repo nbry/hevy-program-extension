@@ -2,8 +2,9 @@ import { useNavigate } from "react-router";
 import { useProgramStore } from "../stores/programStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { useExerciseStore } from "../stores/exerciseStore";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { ImportModal } from "../components/sync/ImportModal";
 
 export function HomePage() {
   const navigate = useNavigate();
@@ -11,6 +12,7 @@ export function HomePage() {
     useProgramStore();
   const { apiKeyConfigured, hevyUsername } = useSettingsStore();
   const { templates } = useExerciseStore();
+  const [showImportModal, setShowImportModal] = useState(false);
 
   useEffect(() => {
     if (!programsLoaded) loadPrograms();
@@ -132,9 +134,19 @@ export function HomePage() {
         }}
       >
         <h3 style={{ fontSize: 16, fontWeight: 600 }}>Your Programs</h3>
-        <button className="btn btn-primary" onClick={handleCreateProgram}>
-          + New Program
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          {apiKeyConfigured && (
+            <button
+              className="btn btn-secondary"
+              onClick={() => setShowImportModal(true)}
+            >
+              Import from Hevy
+            </button>
+          )}
+          <button className="btn btn-primary" onClick={handleCreateProgram}>
+            + New Program
+          </button>
+        </div>
       </div>
 
       {programs.length === 0 ? (
@@ -209,6 +221,10 @@ export function HomePage() {
             </button>
           ))}
         </div>
+      )}
+
+      {showImportModal && (
+        <ImportModal onClose={() => setShowImportModal(false)} />
       )}
     </div>
   );

@@ -139,4 +139,7 @@ export interface SyncRecord {
   hevy_folder_title: string | null;
   last_synced_at: string | null;
   sync_status: "never" | "synced" | "modified" | "error";
+  sync_mode: "program" | "block";
+  sync_direction: "push" | "pull";
+  block_id: string | null;
 }
