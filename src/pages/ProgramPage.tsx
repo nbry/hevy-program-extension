@@ -93,6 +93,10 @@ export function ProgramPage() {
   const nameInputRef = useRef<HTMLInputElement>(null);
   const [showSyncModal, setShowSyncModal] = useState(false);
   const [showPullModal, setShowPullModal] = useState(false);
+  const [pendingRename, setPendingRename] = useState<{
+    level: string;
+    index: number;
+  } | null>(null);
 
   useEffect(() => {
     if (editingName) {
@@ -135,9 +139,7 @@ export function ProgramPage() {
         label: "Rename",
         onClick: () => {
           setActiveBlock(index);
-          // Trigger double-click rename programmatically isn't easy,
-          // so we'll use the existing TabBar double-click mechanism
-          // For simplicity: just select the tab (user can double-click)
+          setPendingRename({ level: "block", index });
         },
       });
       if (activeProgram.blocks.length > 1) {
@@ -180,7 +182,10 @@ export function ProgramPage() {
       if (!m) return [];
       items.push({
         label: "Rename",
-        onClick: () => setActiveMesocycle(index),
+        onClick: () => {
+          setActiveMesocycle(index);
+          setPendingRename({ level: "mesocycle", index });
+        },
       });
       if (!m.mirror_of) {
         items.push({
@@ -267,7 +272,10 @@ export function ProgramPage() {
       if (!mc) return [];
       items.push({
         label: "Rename",
-        onClick: () => setActiveMicrocycle(mc.id),
+        onClick: () => {
+          setActiveMicrocycle(mc.id);
+          setPendingRename({ level: "microcycle", index });
+        },
       });
       // Build "Move to..." submenu with all mesocycles grouped by block
       const moveSubmenu: ContextMenuItem[] = [];
@@ -475,6 +483,10 @@ export function ProgramPage() {
         onTabContextMenu={(i, e) =>
           openTabMenu(e, { level: "block", index: i })
         }
+        requestEditIndex={
+          pendingRename?.level === "block" ? pendingRename.index : null
+        }
+        onEditStarted={() => setPendingRename(null)}
       />
 
       {/* Mesocycle (week) tabs */}
@@ -532,6 +544,10 @@ export function ProgramPage() {
           onTabContextMenu={(i, e) =>
             openTabMenu(e, { level: "mesocycle", index: i })
           }
+          requestEditIndex={
+            pendingRename?.level === "mesocycle" ? pendingRename.index : null
+          }
+          onEditStarted={() => setPendingRename(null)}
         />
       )}
 
@@ -597,6 +613,10 @@ export function ProgramPage() {
               ? (i, e) => openTabMenu(e, { level: "microcycle", index: i })
               : undefined
           }
+          requestEditIndex={
+            pendingRename?.level === "microcycle" ? pendingRename.index : null
+          }
+          onEditStarted={() => setPendingRename(null)}
         />
       )}
 
@@ -662,6 +682,8 @@ function TabBar({
   onRename,
   onReorder,
   onTabContextMenu,
+  requestEditIndex,
+  onEditStarted,
 }: {
   label: string;
   items: string[];
@@ -673,10 +695,24 @@ function TabBar({
   onRename?: (newName: string) => void;
   onReorder?: (fromIndex: number, toIndex: number) => void;
   onTabContextMenu?: (index: number, event: React.MouseEvent) => void;
+  requestEditIndex?: number | null;
+  onEditStarted?: () => void;
 }) {
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editValue, setEditValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (
+      requestEditIndex !== null &&
+      requestEditIndex !== undefined &&
+      onRename
+    ) {
+      setEditingIndex(requestEditIndex);
+      setEditValue(items[requestEditIndex] ?? "");
+      onEditStarted?.();
+    }
+  }, [requestEditIndex]);
 
   useEffect(() => {
     if (editingIndex !== null) {

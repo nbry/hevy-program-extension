@@ -18,18 +18,63 @@ interface ContextMenuProps {
   onClose: () => void;
 }
 
-function MenuPanel({
+export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClose = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("mousedown", handleClose);
+    document.addEventListener("keydown", handleKey);
+    window.addEventListener("scroll", onClose, true);
+    return () => {
+      document.removeEventListener("mousedown", handleClose);
+      document.removeEventListener("keydown", handleKey);
+      window.removeEventListener("scroll", onClose, true);
+    };
+  }, [onClose]);
+
+  // Clamp to viewport
+  const left = Math.min(x, window.innerWidth - 200);
+  const top = Math.min(y, window.innerHeight - items.length * 32 - 16);
+
+  return createPortal(
+    <div
+      ref={ref}
+      style={{
+        position: "fixed",
+        left,
+        top,
+        zIndex: 9999,
+        background: "var(--bg-secondary)",
+        border: "1px solid var(--border)",
+        borderRadius: 6,
+        padding: "4px 0",
+        minWidth: 160,
+        boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
+      }}
+    >
+      <MenuItems items={items} onClose={onClose} parentRef={ref} />
+    </div>,
+    document.body,
+  );
+}
+
+function MenuItems({
   items,
   onClose,
-  style,
+  parentRef,
 }: {
   items: ContextMenuItem[];
   onClose: () => void;
-  style?: React.CSSProperties;
+  parentRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
 
   const handleMouseEnterSubmenu = (index: number) => {
     if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
@@ -47,18 +92,7 @@ function MenuPanel({
   }, []);
 
   return (
-    <div
-      ref={panelRef}
-      style={{
-        background: "var(--bg-secondary)",
-        border: "1px solid var(--border)",
-        borderRadius: 6,
-        padding: "4px 0",
-        minWidth: 160,
-        boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
-        ...style,
-      }}
-    >
+    <>
       {items.map((item, i) => {
         if (item.separator) {
           return (
@@ -122,7 +156,7 @@ function MenuPanel({
               </button>
               {hoveredIndex === i && (
                 <SubmenuPanel
-                  parentRef={panelRef}
+                  parentRef={parentRef}
                   items={item.submenu}
                   onClose={onClose}
                   rowIndex={i}
@@ -168,7 +202,7 @@ function MenuPanel({
           </button>
         );
       })}
-    </div>
+    </>
   );
 }
 
@@ -183,6 +217,7 @@ function SubmenuPanel({
   onClose: () => void;
   rowIndex: number;
 }) {
+  const ref = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState<"right" | "left">("right");
 
   useEffect(() => {
@@ -197,6 +232,7 @@ function SubmenuPanel({
 
   return (
     <div
+      ref={ref}
       style={{
         position: "absolute",
         top: Math.min(topOffset, window.innerHeight - items.length * 28 - 40),
@@ -204,49 +240,15 @@ function SubmenuPanel({
           ? { left: "100%", marginLeft: -2 }
           : { right: "100%", marginRight: -2 }),
         zIndex: 1,
+        background: "var(--bg-secondary)",
+        border: "1px solid var(--border)",
+        borderRadius: 6,
+        padding: "4px 0",
+        minWidth: 160,
+        boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
       }}
     >
-      <MenuPanel items={items} onClose={onClose} />
+      <MenuItems items={items} onClose={onClose} parentRef={ref} />
     </div>
-  );
-}
-
-export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClose = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    };
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("mousedown", handleClose);
-    document.addEventListener("keydown", handleKey);
-    window.addEventListener("scroll", onClose, true);
-    return () => {
-      document.removeEventListener("mousedown", handleClose);
-      document.removeEventListener("keydown", handleKey);
-      window.removeEventListener("scroll", onClose, true);
-    };
-  }, [onClose]);
-
-  // Clamp to viewport
-  const left = Math.min(x, window.innerWidth - 200);
-  const top = Math.min(y, window.innerHeight - items.length * 32 - 16);
-
-  return createPortal(
-    <div
-      ref={ref}
-      style={{
-        position: "fixed",
-        left,
-        top,
-        zIndex: 9999,
-      }}
-    >
-      <MenuPanel items={items} onClose={onClose} />
-    </div>,
-    document.body,
   );
 }
