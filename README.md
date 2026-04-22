@@ -2,7 +2,7 @@
 
 ## What It Does
 
-Hevy is an excellent app for logging workouts, but the interface is as bit limited for designing multi-week periodized programs. This app fills that gap with a spreadsheet-like interface for building training programs, then pushes them to Hevy as routine folders so you can execute them from the Hevy app.
+Hevy is an excellent app for logging workouts, but the interface is a bit limited for designing multi-week periodized programs. This app fills that gap with a spreadsheet-like interface for building training programs, then pushes them to Hevy as routine folders so you can execute them from the Hevy app.
 
 <img width="1649" height="888" alt="image" src="https://github.com/user-attachments/assets/ad567bc1-81ae-4ff1-b2db-82601cf1843d" />
 
